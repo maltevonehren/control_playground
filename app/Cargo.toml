@@ -1,0 +1,18 @@
+[package]
+name = "app"
+version.workspace = true
+authors.workspace = true
+edition = "2021"
+
+[dependencies]
+codee = "0.2.0"
+console_error_panic_hook = "0.1"
+console_log = "1"
+leptos = { version = "0.6.14", features = ["csr"] }
+leptos-use = "0.13.0"
+log = "0.4"
+wasm-bindgen = "0.2.0"
+web-sys = "0.3.70"
+
+[package.metadata.leptos]
+lib-profile-release = "wasm-release"

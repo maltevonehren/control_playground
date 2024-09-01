@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+  <head>
+
+    <link data-trunk rel="css" type="text/css" href="style.css" />
+    <link data-trunk rel="css" type="text/css" href="fonts/mathfonts.css" />
+    <link data-trunk rel="copy-file" href="fonts/STIXTwoMath-Regular.woff2" />
+
+    <!-- Code Editor integration -->
+    <script type="importmap">
+      {
+        "imports": {
+          "@codemirror/state": "https://unpkg.com/@codemirror/state@6.4.1/dist/index.js",
+          "@codemirror/view": "https://unpkg.com/@codemirror/view@6.33.0/dist/index.js",
+          "@codemirror/commands": "https://unpkg.com/@codemirror/commands@6.6.1/dist/index.js",
+          "@codemirror/language": "https://unpkg.com/@codemirror/language@6.10.2/dist/index.js",
+          "style-mod": "https://unpkg.com/style-mod@4.1.2/src/style-mod.js",
+          "w3c-keyname": "https://unpkg.com/w3c-keyname@2.2.8/index.js",
+          "@lezer/common": "https://unpkg.com/@lezer/common@1.2.1/dist/index.js",
+          "@lezer/highlight": "https://unpkg.com/@lezer/highlight@1.2.1/dist/index.js"
+        }
+      }
+    </script>
+    <script data-trunk type="module" src="CodeEditorWC.js"></script>
+
+  </head>
+  <body></body>
+</html>

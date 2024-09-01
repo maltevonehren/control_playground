@@ -1,0 +1,14 @@
+[workspace]
+members = ["app"]
+resolver = "2"
+
+[workspace.package]
+authors = ["Malte von Ehren"]
+version = "0.1.0"
+edition = "2021"
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = 'z'
+lto = true
+codegen-units = 1
