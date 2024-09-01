@@ -1,0 +1,119 @@
+use std::fmt;
+use std::fmt::Write;
+
+use nalgebra::{DMatrix, DVector, RowDVector, SMatrix};
+
+use crate::{state_space::DiscreteStateSpace, write_float};
+
+/// Discrete Time Transfer Function
+///
+/// Invariant: `num.len() > 0 && den.len() > 0`
+#[derive(Clone, Debug, PartialEq)]
+pub struct DiscreteTransferFunction {
+    num: DVector<f64>,
+    den: DVector<f64>,
+}
+
+impl DiscreteTransferFunction {
+    pub fn convert_to_state_space(&self) -> Option<DiscreteStateSpace> {
+        if self.den.len() < self.num.len() {
+            return None;
+        }
+        let order = self.den.len() - 1;
+        let d0 = self.den[0]; // normalization coeff
+        if d0 == 0. {
+            return None;
+        }
+
+        let mut a = DMatrix::zeros(order, order);
+        a.row_mut(0)
+            .iter_mut()
+            .zip(self.den.iter().skip(1))
+            .for_each(|(el, di)| *el = -di / d0);
+        a.view_mut((1, 0), (order - 1, order - 1)).fill_diagonal(1.);
+
+        let mut b = DVector::zeros(order);
+        b[0] = 1.;
+
+        let n0 = self.num[0] / d0;
+        let zipped = self.num.iter().zip(self.den.iter());
+        let c =
+            RowDVector::from_iterator(order, zipped.skip(1).map(|(ni, di)| (ni - di * n0) / d0));
+
+        let d = SMatrix::from_element(n0);
+
+        // Matlab uses a rescaling step here with diagonal T were the elements are powers of 2
+        //     A' = inv(T) * A * T
+        //     B' = inv(T) * B
+        //     C' = C * T
+
+        Some(DiscreteStateSpace { a, b, c, d })
+    }
+}
+
+impl fmt::Display for DiscreteTransferFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn format_poly(vals: &DVector<f64>) -> Result<String, fmt::Error> {
+            let mut out = String::new();
+            write_float(&mut out, vals[0])?;
+            for (i, el) in vals.iter().enumerate().skip(1) {
+                if *el == 0. {
+                    continue;
+                }
+                if *el < 0. {
+                    write!(out, " - ")?;
+                } else {
+                    write!(out, " + ")?;
+                }
+                write_float(&mut out, el.abs())?;
+                write!(out, " z^-{}", i)?;
+            }
+            Ok(out)
+        }
+        let num = format_poly(&self.num)?;
+        let den = format_poly(&self.den)?;
+        let len = num.len().max(den.len());
+        writeln!(f, "{}{}", " ".repeat((len - num.len()) / 2), num)?;
+        writeln!(f, "{}", "-".repeat(len))?;
+        writeln!(f, "{}{}", " ".repeat((len - den.len()) / 2), den)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_relative_eq;
+
+    #[test]
+    fn tf_display() {
+        let tf = DiscreteTransferFunction {
+            num: DVector::from_iterator(3, [-1.0, 1.5, -2.0].iter().copied()),
+            den: DVector::from_iterator(3, [1.5, 0.5, 0.75].iter().copied()),
+        };
+        let out = format!("{tf}");
+        assert_eq!(
+            &out,
+            "  -1 + 1.5 z^-1 - 2 z^-2\n--------------------------\n1.5 + 0.5 z^-1 + 0.75 z^-2\n"
+        );
+    }
+
+    #[test]
+    fn state_space_conversion() {
+        let tf = DiscreteTransferFunction {
+            num: DVector::from_iterator(3, [1.0, 1.5, 2.0].iter().copied()),
+            den: DVector::from_iterator(3, [1.5, 0.5, 0.75].iter().copied()),
+        };
+        let ss = tf.convert_to_state_space().unwrap();
+        assert_relative_eq!(
+            ss.a,
+            DMatrix::from_iterator(2, 2, [-1. / 3., 1., -0.5, 0.].iter().copied())
+        );
+        assert_relative_eq!(ss.b, DVector::from_iterator(2, [1., 0.].iter().copied()));
+        assert_relative_eq!(
+            ss.c,
+            RowDVector::from_iterator(2, [7. / 9., 1.0].iter().copied())
+        );
+        assert_relative_eq!(ss.d, SMatrix::<f64, 1, 1>::from_element(2. / 3.));
+    }
+}
