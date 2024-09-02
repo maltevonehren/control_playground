@@ -3,7 +3,7 @@ use std::fmt::Write;
 
 use nalgebra::{DMatrix, DVector, RowDVector, SMatrix};
 
-use crate::{state_space::DiscreteStateSpace, write_float};
+use crate::{state_space::DiscreteStateSpaceModel, write_float};
 
 /// Discrete Time Transfer Function
 ///
@@ -22,7 +22,7 @@ impl DiscreteTransferFunction {
         Some(Self { num, den })
     }
 
-    pub fn convert_to_state_space(&self) -> Option<DiscreteStateSpace> {
+    pub fn convert_to_state_space(&self) -> Option<DiscreteStateSpaceModel> {
         if self.den.len() < self.num.len() {
             return None;
         }
@@ -42,19 +42,21 @@ impl DiscreteTransferFunction {
         let mut b = DVector::zeros(order);
         b[0] = 1.;
 
-        let n0 = self.num[0] / d0;
-        let zipped = self.num.iter().zip(self.den.iter());
-        let c =
-            RowDVector::from_iterator(order, zipped.skip(1).map(|(ni, di)| (ni - di * n0) / d0));
+        let factor = self.num[0] / (d0 * d0);
+        let mut c =
+            RowDVector::from_iterator(order, self.den.iter().skip(1).map(|di| -di * factor));
+        c.iter_mut()
+            .zip(self.num.iter().skip(1))
+            .for_each(|(el, ni)| *el += ni / d0);
 
-        let d = SMatrix::from_element(n0);
+        let d = SMatrix::from_element(factor);
 
         // Matlab uses a rescaling step here with diagonal T were the elements are powers of 2
         //     A' = inv(T) * A * T
         //     B' = inv(T) * B
         //     C' = C * T
 
-        Some(DiscreteStateSpace { a, b, c, d })
+        Some(DiscreteStateSpaceModel { a, b, c, d })
     }
 }
 

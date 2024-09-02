@@ -5,10 +5,12 @@ pub struct Program {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Statement {
+    ExpressionStatement(Expression),
     Assign(String, Expression),
 }
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expression {
     TransferFunction(Vec<f64>, Vec<f64>),
+    TF2SS(String),
 }

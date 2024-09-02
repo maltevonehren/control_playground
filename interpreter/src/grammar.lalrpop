@@ -16,11 +16,13 @@ Statements: Vec<Statement> = {
 }
 
 pub(crate) Statement: Statement = {
+    <e:Expression> => Statement::ExpressionStatement(e),
     <i:Identifier> "=" <e:Expression> => Statement::Assign(i.to_string(), e),
 };
 
 pub(crate) Expression: Expression = {
     "tf" "(" <a:Vec> "," <b:Vec> ")" => Expression::TransferFunction(a, b),
+    "tf2ss" "(" <Identifier> ")" => Expression::TF2SS(<>.to_string()),
 };
 
 Vec: Vec<f64> = {

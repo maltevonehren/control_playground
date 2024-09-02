@@ -13,7 +13,7 @@ pub fn App() -> impl IntoView {
     // for now source code is a string stored in local storage
     let (storage, set_storage, _) = use_local_storage::<String, FromToStringCodec>("testcode");
     let (code, set_code) = create_signal(storage.get_untracked());
-    let code_debounced = signal_debounced(code, 1000.0);
+    let code_debounced = signal_debounced(code, 300.0);
     create_effect(move |_| {
         set_storage.set(code_debounced.get());
     });
