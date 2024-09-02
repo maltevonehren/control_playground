@@ -26,32 +26,34 @@ impl DiscreteTransferFunction {
         if self.den.len() < self.num.len() {
             return None;
         }
-        let order = self.den.len() - 1;
         let d0 = self.den[0]; // normalization coeff
         if d0 == 0. {
             return None;
         }
+        let order = self.den.len() - 1;
+        let n0 = self.num[0];
 
         let mut a = DMatrix::zeros(order, order);
-        a.row_mut(0)
-            .iter_mut()
-            .zip(self.den.iter().skip(1))
-            .for_each(|(el, di)| *el = -di / d0);
-        a.view_mut((1, 0), (order - 1, order - 1)).fill_diagonal(1.);
-
         let mut b = DVector::zeros(order);
-        b[0] = 1.;
-
-        let factor = self.num[0] / (d0 * d0);
         let mut c =
-            RowDVector::from_iterator(order, self.den.iter().skip(1).map(|di| -di * factor));
-        c.iter_mut()
-            .zip(self.num.iter().skip(1))
-            .for_each(|(el, ni)| *el += ni / d0);
+            RowDVector::from_iterator(order, self.den.iter().skip(1).map(|di| -di / d0 * n0 / d0));
+        let d = SMatrix::from_element(n0 / d0);
 
-        let d = SMatrix::from_element(factor);
+        if order > 0 {
+            a.row_mut(0)
+                .iter_mut()
+                .zip(self.den.iter().skip(1))
+                .for_each(|(el, di)| *el = -di / d0);
+            a.view_mut((1, 0), (order - 1, order - 1)).fill_diagonal(1.);
 
-        // Matlab uses a rescaling step here with diagonal T were the elements are powers of 2
+            b[0] = 1.;
+
+            c.iter_mut()
+                .zip(self.num.iter().skip(1))
+                .for_each(|(el, ni)| *el += ni / d0);
+        }
+
+        // Matlab uses a rescaling step (prescale) here with diagonal T were the elements are powers of 2
         //     A' = inv(T) * A * T
         //     B' = inv(T) * B
         //     C' = C * T
@@ -130,6 +132,19 @@ mod tests {
             ss.c,
             RowDVector::from_iterator(2, [7. / 9., 1.0].iter().copied())
         );
+        assert_relative_eq!(ss.d, SMatrix::<f64, 1, 1>::from_element(2. / 3.));
+    }
+
+    #[test]
+    fn state_space_conversion_gain_only() {
+        let tf = DiscreteTransferFunction {
+            num: DVector::from_iterator(1, [2.0].iter().copied()),
+            den: DVector::from_iterator(1, [3.0].iter().copied()),
+        };
+        let ss = tf.convert_to_state_space().unwrap();
+        assert_relative_eq!(ss.a, DMatrix::zeros(0, 0));
+        assert_relative_eq!(ss.b, DVector::zeros(0));
+        assert_relative_eq!(ss.c, RowDVector::zeros(0));
         assert_relative_eq!(ss.d, SMatrix::<f64, 1, 1>::from_element(2. / 3.));
     }
 }
