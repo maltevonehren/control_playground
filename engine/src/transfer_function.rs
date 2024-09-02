@@ -15,6 +15,13 @@ pub struct DiscreteTransferFunction {
 }
 
 impl DiscreteTransferFunction {
+    pub fn new(num: DVector<f64>, den: DVector<f64>) -> Option<Self> {
+        if num.is_empty() || den.is_empty() {
+            return None;
+        }
+        Some(Self { num, den })
+    }
+
     pub fn convert_to_state_space(&self) -> Option<DiscreteStateSpace> {
         if self.den.len() < self.num.len() {
             return None;
@@ -55,18 +62,25 @@ impl fmt::Display for DiscreteTransferFunction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fn format_poly(vals: &DVector<f64>) -> Result<String, fmt::Error> {
             let mut out = String::new();
-            write_float(&mut out, vals[0])?;
-            for (i, el) in vals.iter().enumerate().skip(1) {
+            let mut written = false;
+            for (i, el) in vals.iter().enumerate() {
                 if *el == 0. {
                     continue;
                 }
-                if *el < 0. {
-                    write!(out, " - ")?;
+                if written {
+                    if *el < 0. {
+                        write!(out, " - ")?;
+                    } else {
+                        write!(out, " + ")?;
+                    }
+                    write_float(&mut out, el.abs())?;
                 } else {
-                    write!(out, " + ")?;
+                    write_float(&mut out, *el)?;
+                    written = true;
                 }
-                write_float(&mut out, el.abs())?;
-                write!(out, " z^-{}", i)?;
+                if i > 0 {
+                    write!(out, " z^-{}", i)?;
+                }
             }
             Ok(out)
         }

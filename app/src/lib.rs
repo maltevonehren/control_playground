@@ -14,14 +14,22 @@ pub fn App() -> impl IntoView {
     let (storage, set_storage, _) = use_local_storage::<String, FromToStringCodec>("testcode");
     let (code, set_code) = create_signal(storage.get_untracked());
     let code_debounced = signal_debounced(code, 1000.0);
-    create_memo(move |_| {
-        with!(|code_debounced| {
-            set_storage.set(code_debounced.clone());
-        })
+    create_effect(move |_| {
+        set_storage.set(code_debounced.get());
     });
 
-    // extremly exciting output so far!
-    let output = move || code.get();
+    let output = create_memo(move |_| {
+        with!(|code_debounced| {
+            let program = match interpreter::grammar::ProgramParser::new().parse(code_debounced) {
+                Ok(r) => r,
+                Err(e) => return e.to_string(),
+            };
+            match interpreter::execute(&program) {
+                Ok(r) => r,
+                Err(e) => format!("{e:?}"),
+            }
+        })
+    });
 
     view! {
         <title>"Program Demo"</title>

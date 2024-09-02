@@ -1,0 +1,13 @@
+[package]
+name = "interpreter"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+lalrpop-util = { version = "0.20.0", features = ["lexer"] }
+engine = { path = "../engine" }
+nalgebra = "0.33.0"
+
+[build-dependencies]
+lalrpop = "0.21.0"

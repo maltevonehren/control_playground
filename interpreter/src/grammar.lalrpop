@@ -1,0 +1,45 @@
+use std::str::FromStr;
+use crate::ast::{Expression, Program, Statement};
+
+grammar;
+
+pub Program: Program = {
+    <Statements> => Program { statements: <> }
+};
+
+Statements: Vec<Statement> = {
+    <mut list:Statements> <c:Statement> ";" => {
+        list.push(c);
+        list
+    },
+    <Statement> ";" => vec![<>],
+}
+
+pub(crate) Statement: Statement = {
+    <i:Identifier> "=" <e:Expression> => Statement::Assign(i.to_string(), e),
+};
+
+pub(crate) Expression: Expression = {
+    "tf" "(" <a:Vec> "," <b:Vec> ")" => Expression::TransferFunction(a, b),
+};
+
+Vec: Vec<f64> = {
+    "[" <NumList> "]" => <>,
+};
+
+NumList: Vec<f64> = {
+    <mut list:NumList> <n:Num> => {
+        list.push(n);
+        list
+    },
+    /* empty */ => vec![],
+};
+
+
+Num: f64 = {
+    r"-?([0-9]+(\.[0-9]+)?)|(\.[0-9]+)" => f64::from_str(<>).unwrap(),
+};
+
+Identifier: &'input str = {
+    <r"\p{L}[\p{L}\p{N}_]*">
+}

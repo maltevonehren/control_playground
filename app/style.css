@@ -22,18 +22,19 @@ math {
 }
 
 .background {
-    background: linear-gradient(#eeeef0 , #e5e5ea);
+    background: linear-gradient(#eeeef0, #e5e5ea);
     height: 100vh;
     display: grid;
     padding: 8px 8px 0px;
     column-gap: 8px;
     row-gap: 8px;
-    grid-template-rows: auto minmax(0,1fr);
-    grid-template-columns: auto minmax(0,1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr);
 }
 
 .sidebar {
-    writing-mode: vertical-lr;/*temp*/
+    writing-mode: vertical-lr;
+    /*temp*/
 }
 
 .floating-pane {
@@ -48,6 +49,7 @@ math {
     padding: 8px;
     white-space: pre;
     user-select: none;
+    font-family: "Fira Code", monospace;
 }
 
 .cm-editor {
