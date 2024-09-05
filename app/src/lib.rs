@@ -6,28 +6,36 @@ use leptos_use::signal_debounced;
 use leptos_use::storage::use_local_storage;
 use web_sys::Event;
 
+use storage::StorageSidebar;
+
 mod js_types;
+mod storage;
+
+struct ExecEnv {}
+
+impl interpreter::execution::Env for ExecEnv {
+    fn read_file(&self, name: &str) -> Option<String> {
+        storage::get_file(name)
+    }
+}
 
 #[component]
 pub fn App() -> impl IntoView {
     // for now source code is a string stored in local storage
-    let (storage, set_storage, _) = use_local_storage::<String, FromToStringCodec>("testcode");
-    let (code, set_code) = create_signal(storage.get_untracked());
+    let (code_storage, set_code_storage, _) =
+        use_local_storage::<String, FromToStringCodec>("testcode");
+    let (code, set_code) = create_signal(code_storage.get_untracked());
     let code_debounced = signal_debounced(code, 300.0);
     create_effect(move |_| {
-        set_storage.set(code_debounced.get());
+        set_code_storage.set(code_debounced.get());
     });
 
     let output = create_memo(move |_| {
         with!(|code_debounced| {
-            let program = match interpreter::grammar::ProgramParser::new().parse(code_debounced) {
-                Ok(r) => r,
-                Err(e) => return e.to_string(),
-            };
-            match interpreter::execute(&program) {
-                Ok(r) => r,
-                Err(e) => format!("{e:?}"),
-            }
+            let program = interpreter::grammar::ProgramParser::new()
+                .parse(code_debounced)
+                .map_err(|e| e.to_string())?;
+            Ok(interpreter::execution::execute(&program, &ExecEnv {}))
         })
     });
 
@@ -36,10 +44,10 @@ pub fn App() -> impl IntoView {
         <div class="background">
             <div> /* logo area */ </div>
             <div class="header">
-                <h2>dummy header</h2>
+                <h2>Control Playground</h2>
             </div>
-            <div class="sidebar">
-                sidebar
+            <div class="floating-pane">
+                <StorageSidebar />
             </div>
             <div style:display="grid"
                  style:grid-template-columns="minmax(0px,50fr) 12px minmax(0px,50fr)">
@@ -56,10 +64,42 @@ pub fn App() -> impl IntoView {
                 </div>
                 <div class="floating-pane">
                     <div class="output" >
-                        { output }
+                        <Output output=output />
                     </div>
                 </div>
             </div>
+        </div>
+    }
+}
+
+#[component]
+pub fn Output(
+    #[prop(into)] output: Signal<Result<Vec<interpreter::execution::Output>, String>>,
+) -> impl IntoView {
+    move || match output.get() {
+        Err(e) => view! {
+            <span class="error" >
+                Syntax Error
+                <br/>
+                { e.to_string() }
+            </span>
+        }
+        .into_view(),
+        Ok(output) => output
+            .iter()
+            .map(|el| view! {<OutputElement element=el/>})
+            .collect_view(),
+    }
+}
+
+#[component]
+pub fn OutputElement<'a>(element: &'a interpreter::execution::Output) -> impl IntoView {
+    view! {
+        <div class="element" >
+            { match element {
+                interpreter::execution::Output::Err(e) => view!{ <span class="error"> { format!("{e:?}") } </span> }.into_view(),
+                interpreter::execution::Output::Text(t) => t.trim_end().to_string().into_view(),
+            } }
         </div>
     }
 }

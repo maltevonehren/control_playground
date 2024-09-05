@@ -11,6 +11,9 @@ pub enum Statement {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expression {
+    Identifier(String),
+    StringLiteral(String),
     TransferFunction(Vec<f64>, Vec<f64>),
-    TF2SS(String),
+    Tf2Ss(Box<Expression>),
+    Load(Box<Expression>),
 }

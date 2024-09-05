@@ -33,8 +33,10 @@ math {
 }
 
 .sidebar {
-    writing-mode: vertical-lr;
-    /*temp*/
+    display: grid;
+    padding: 8px;
+    row-gap: 8px;
+    grid-template-rows: auto minmax(0, 1fr);
 }
 
 .floating-pane {
@@ -46,10 +48,32 @@ math {
 }
 
 .output {
-    padding: 8px;
+    padding: 12px 8px;
+    display: grid;
+    columns: (1fr);
+    row-gap: 12px;
     white-space: pre;
+}
+
+.output .error {
+    font-weight: bold;
+    color: red;
+}
+
+.output .element {
+    padding: 8px;
     user-select: none;
     font-family: "Fira Code", monospace;
+    background-color: #e5e5ea;
+    border-radius: 3px;
+    box-shadow: 2px 2px 4px 0px rgba(22, 22, 22, 0.24);
+}
+
+button {
+    border: none;
+    padding: 4px;
+    background-color: #e5e5ea;
+    border-radius: 3px;
 }
 
 .cm-editor {
