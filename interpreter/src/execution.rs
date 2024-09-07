@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use engine::state_space::DiscreteStateSpaceModel;
 use engine::transfer_function::DiscreteTransferFunction;
-use nalgebra::{DVector, Matrix2xX};
+use nalgebra::{DMatrix, DVector};
 
 use crate::ast::{Expression, Program, Statement};
 
@@ -26,14 +26,14 @@ pub enum Value {
     String(String),
     TransferFunction(DiscreteTransferFunction),
     StateSpaceModel(DiscreteStateSpaceModel),
-    Matrix(Matrix2xX<f64>),
+    Matrix(DMatrix<f64>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Output {
     Err(Error),
     Text(String),
-    Plot(Matrix2xX<f64>),
+    Plot(DMatrix<f64>),
 }
 
 impl From<&Value> for Output {
@@ -106,7 +106,22 @@ fn eval(
             let text = exec_env
                 .read_file(&file_name)
                 .ok_or(Error::Other(format!("file {file_name} could not be read")))?;
-            Value::String(text)
+            let mut rdr = csv::ReaderBuilder::new()
+                .has_headers(false)
+                .from_reader(text.as_bytes());
+            let mut m = DMatrix::zeros(0, 0);
+            for (i, result) in rdr.records().enumerate() {
+                let record =
+                    result.map_err(|_| Error::Other("Error while parsing csv".to_string()))?;
+                if i == 0 {
+                    m = m.resize(record.len(), 0, 0.);
+                }
+                m = m.insert_column(i, 0.);
+                for (j, v) in record.iter().enumerate() {
+                    m[(j, i)] = v.parse().unwrap();
+                }
+            }
+            Value::Matrix(m)
         }
         Step(ss) => {
             let ss = match eval(ss, values, exec_env)? {
@@ -117,7 +132,7 @@ fn eval(
                 _ => return Err(Error::TypeError),
             };
             let output = ss.step();
-            Value::Matrix(output)
+            Value::Matrix(output.insert_rows(0, 0, 0.)) // TODO: is there a better way to convert to DMatrix?
         }
     };
     Ok(value)

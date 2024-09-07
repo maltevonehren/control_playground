@@ -8,6 +8,8 @@ edition.workspace = true
 lalrpop-util = { version = "0.20.0", features = ["lexer"] }
 engine = { path = "../engine" }
 nalgebra = "0.33.0"
+csv = "1.3.0"
+log = "0.4.22"
 
 [build-dependencies]
 lalrpop = "0.21.0"

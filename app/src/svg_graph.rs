@@ -1,11 +1,11 @@
+use engine::NiceFloat;
 use leptos::*;
 use leptos_use::{use_element_size, UseElementSizeReturn};
-use log::info;
-use nalgebra::{Dim, Matrix2xX, MatrixView1xX};
+use nalgebra::{DMatrix, Dim, MatrixView1xX};
 use std::fmt::Write;
 
 #[component]
-pub fn SVGGraph(#[prop(into)] data: Signal<Matrix2xX<f64>>, initial_height: f64) -> impl IntoView {
+pub fn SVGGraph(#[prop(into)] data: Signal<DMatrix<f64>>, initial_height: f64) -> impl IntoView {
     let el = create_node_ref::<html::Div>();
     let UseElementSizeReturn { width, height } = use_element_size(el);
 
@@ -14,13 +14,13 @@ pub fn SVGGraph(#[prop(into)] data: Signal<Matrix2xX<f64>>, initial_height: f64)
     let margin_top = 20.;
     let margin_right = 20.;
     let margin_bottom = 50.;
-    let tightest_x_tick_spacing = 70.;
-    let tightest_y_tick_spacing = 50.;
+    let tightest_x_tick_spacing = 80.;
+    let tightest_y_tick_spacing = 60.;
     let height = move || height.get().max(margin_top + margin_bottom + 5.0);
     let graph_width = move || width.get() - margin_left - margin_right;
     let graph_height = move || height() - margin_top - margin_bottom;
-    let x_min_max = create_memo(move |_| (data.get().row(0).min(), data.get().row(0).max()));
-    let y_min_max = create_memo(move |_| (data.get().row(1).min(), data.get().row(1).max()));
+    let x_min_max = create_memo(move |_| (0.0, data.get().ncols() as f64));
+    let y_min_max = create_memo(move |_| (data.get().min(), data.get().max()));
 
     let mapping = create_memo(move |_| {
         Mapping::new(
@@ -42,7 +42,14 @@ pub fn SVGGraph(#[prop(into)] data: Signal<Matrix2xX<f64>>, initial_height: f64)
         <div node_ref=el style:overflow="hidden" style:resize="vertical" style:height=format!("{initial_height}px")>
         <svg width="100%" height="100%" >
         <g transform=move || format!("translate({margin_left} {})", height() - margin_bottom)>
-            {move || make_path(colors[0], data.get().row(0), data.get().row(1), &mapping.get()) }
+            <path fill="white" stroke="gray" stroke-width=0.5
+                d={move || format!("M 0,0 V{} H{} V0", -graph_height(), graph_width())} />
+            {move || {
+                let mapping = mapping.get();
+                data.get().row_iter().enumerate().map(
+                    |(i, row)| make_path(colors[i % colors.len()], row, &mapping)
+                ).collect_view()
+            }}
             {move || {
                 let mapping = mapping.get();
                 x_axis.get().ticks()
@@ -139,7 +146,7 @@ impl Axis {
     }
 
     fn ticks(&self) -> impl Iterator<Item = f64> {
-        let t_min = (self.min / self.step).floor() as usize;
+        let t_min = (self.min / self.step).ceil() as usize;
         let t_max = (self.max / self.step).floor() as usize;
         let step = self.step;
         (t_min..=t_max).map(move |t| t as f64 * step)
@@ -148,13 +155,13 @@ impl Axis {
 
 fn make_path(
     color: &'static str,
-    x: MatrixView1xX<f64, impl Dim, impl Dim>,
+    // x: MatrixView1xX<f64, impl Dim, impl Dim>,
     y: MatrixView1xX<f64, impl Dim, impl Dim>,
     m: &Mapping,
 ) -> impl IntoView {
     let mut path = "M".to_string();
-    for (x, y) in x.iter().zip(y) {
-        let (x, y) = m.map((*x, *y));
+    for (x, y) in y.iter().enumerate() {
+        let (x, y) = m.map((x as f64, *y));
         write!(path, " {},{}", x, y).unwrap();
     }
     view! {
@@ -166,7 +173,7 @@ fn make_x_tick(pos: f64, m: &Mapping, graph_height: f64) -> impl IntoView {
     let p = m.map_x(pos);
     let path = format!("M {},{} V{}", p, 0, -graph_height);
     view! {
-        <text text-anchor="middle" x=p y=20 >{format!("{pos:.2}")}</text>
+        <text text-anchor="middle" x=p y=20 >{format!("{}", NiceFloat(pos))}</text>
         <path fill="none" stroke="gray" stroke-width=0.5 d=path name=pos/>
     }
 }
@@ -175,7 +182,7 @@ fn make_y_tick(pos: f64, m: &Mapping, graph_width: f64) -> impl IntoView {
     let p = m.map_y(pos);
     let path = format!("M {},{} H{}", 0, p, graph_width);
     view! {
-        <text text-anchor="end" x=-5 y=p>{format!("{pos:.2}")}</text>
+        <text text-anchor="end" x=-5 y=p>{format!("{}", NiceFloat(pos))}</text>
         <path fill="none" stroke="gray" stroke-width=0.5 d=path name=pos/>
     }
 }

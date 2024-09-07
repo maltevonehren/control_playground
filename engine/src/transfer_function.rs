@@ -3,7 +3,7 @@ use std::fmt::Write;
 
 use nalgebra::{DMatrix, DVector, RowDVector, SMatrix};
 
-use crate::{state_space::DiscreteStateSpaceModel, write_float};
+use crate::{state_space::DiscreteStateSpaceModel, NiceFloat};
 
 /// Discrete Time Transfer Function
 ///
@@ -73,13 +73,12 @@ impl fmt::Display for DiscreteTransferFunction {
                 }
                 if written {
                     if *el < 0. {
-                        write!(out, " - ")?;
+                        write!(out, " - {}", NiceFloat(el.abs()))?;
                     } else {
-                        write!(out, " + ")?;
+                        write!(out, " + {}", NiceFloat(el.abs()))?;
                     }
-                    write_float(&mut out, el.abs())?;
                 } else {
-                    write_float(&mut out, *el)?;
+                    write!(out, "{}", NiceFloat(*el))?;
                     written = true;
                 }
                 if i > 0 {
