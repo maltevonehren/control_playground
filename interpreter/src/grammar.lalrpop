@@ -25,6 +25,7 @@ pub(crate) Expression: Expression = {
     "tf" "(" <a:Vec> "," <b:Vec> ")" => Expression::TransferFunction(a, b),
     "tf2ss" "(" <Expression> ")" => Expression::Tf2Ss(Box::new(<>)),
     "load" "(" <Expression> ")" => Expression::Load(Box::new(<>)),
+    "step" "(" <Expression> ")" => Expression::Step(Box::new(<>)),
     <r#""[^"]*""#> => Expression::StringLiteral(<>.strip_prefix(r#"""#).unwrap().strip_suffix(r#"""#).unwrap().to_string()),
 };
 

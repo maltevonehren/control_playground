@@ -16,4 +16,5 @@ pub enum Expression {
     TransferFunction(Vec<f64>, Vec<f64>),
     Tf2Ss(Box<Expression>),
     Load(Box<Expression>),
+    Step(Box<Expression>),
 }

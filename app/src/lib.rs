@@ -7,9 +7,11 @@ use leptos_use::storage::use_local_storage;
 use web_sys::Event;
 
 use storage::StorageSidebar;
+use svg_graph::SVGGraph;
 
 mod js_types;
 mod storage;
+mod svg_graph;
 
 struct ExecEnv {}
 
@@ -86,19 +88,22 @@ pub fn Output(
         }
         .into_view(),
         Ok(output) => output
-            .iter()
+            .into_iter()
             .map(|el| view! {<OutputElement element=el/>})
             .collect_view(),
     }
 }
 
 #[component]
-pub fn OutputElement<'a>(element: &'a interpreter::execution::Output) -> impl IntoView {
+pub fn OutputElement(element: interpreter::execution::Output) -> impl IntoView {
     view! {
         <div class="element" >
-            { match element {
-                interpreter::execution::Output::Err(e) => view!{ <span class="error"> { format!("{e:?}") } </span> }.into_view(),
-                interpreter::execution::Output::Text(t) => t.trim_end().to_string().into_view(),
+            {
+                use interpreter::execution::Output::*;
+            match element {
+                Err(e) => view!{ <span class="error"> { format!("{e:?}") } </span> }.into_view(),
+                Text(t) => t.trim_end().to_string().into_view(),
+                Plot(data) => view!{ <SVGGraph data={move || data.clone()} initial_height=300.0 /> },
             } }
         </div>
     }
