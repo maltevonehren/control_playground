@@ -13,8 +13,9 @@ pub enum Statement {
 pub enum Expression {
     Identifier(String),
     StringLiteral(String),
-    TransferFunction(Vec<f64>, Vec<f64>),
-    Tf2Ss(Box<Expression>),
-    Load(Box<Expression>),
-    Step(Box<Expression>),
+    VectorLiteral(Vec<f64>),
+    FunctionCall {
+        function: Box<Expression>,
+        arguments: Vec<Expression>,
+    },
 }
