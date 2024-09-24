@@ -19,7 +19,7 @@ pub fn SVGGraph(#[prop(into)] data: Signal<DMatrix<f64>>, initial_height: f64) -
     let height = move || height.get().max(margin_top + margin_bottom + 5.0);
     let graph_width = move || width.get() - margin_left - margin_right;
     let graph_height = move || height() - margin_top - margin_bottom;
-    let x_min_max = create_memo(move |_| (0.0, data.get().ncols() as f64));
+    let x_min_max = create_memo(move |_| (0.0, data.get().ncols() as f64 - 1.0));
     let y_min_max = create_memo(move |_| (data.get().min(), data.get().max()));
 
     let mapping = create_memo(move |_| {
@@ -40,10 +40,10 @@ pub fn SVGGraph(#[prop(into)] data: Signal<DMatrix<f64>>, initial_height: f64) -
     });
     view! {
         <div node_ref=el style:overflow="hidden" style:resize="vertical" style:height=format!("{initial_height}px")>
-        <svg width="100%" height="100%" >
+        <svg width="100%" height="100%" style:stroke-width="2px" >
         <g transform=move || format!("translate({margin_left} {})", height() - margin_bottom)>
-            <path fill="white" stroke="gray" stroke-width=0.5
-                d={move || format!("M 0,0 V{} H{} V0", -graph_height(), graph_width())} />
+            <path fill="white" stroke="none"
+                d={move || format!("M 0,0 V{} H{} V0 H0", -graph_height(), graph_width())} />
             {move || {
                 let mapping = mapping.get();
                 data.get().row_iter().enumerate().map(
@@ -62,6 +62,8 @@ pub fn SVGGraph(#[prop(into)] data: Signal<DMatrix<f64>>, initial_height: f64) -
                     .map(|pos| make_y_tick(pos, &mapping, graph_width()))
                     .collect_view()
             }}
+            <path fill="none" stroke="black"
+                d={move || format!("M 0,0 V{} H{} V0 H0", -graph_height(), graph_width())} />
         </g>
         </svg>
         </div>
@@ -165,24 +167,26 @@ fn make_path(
         write!(path, " {},{}", x, y).unwrap();
     }
     view! {
-        <path fill="none" stroke=color stroke-linejoin="round" stroke-width=3. stroke-linecap="round" d=path/>
+        <path fill="none" stroke=color stroke-linejoin="round" stroke-width=2. stroke-linecap="round" d=path/>
     }
 }
 
 fn make_x_tick(pos: f64, m: &Mapping, graph_height: f64) -> impl IntoView {
     let p = m.map_x(pos);
-    let path = format!("M {},{} V{}", p, 0, -graph_height);
     view! {
         <text text-anchor="middle" x=p y=20 >{format!("{}", NiceFloat(pos))}</text>
-        <path fill="none" stroke="gray" stroke-width=0.5 d=path name=pos/>
+        <path fill="none" stroke="gray" stroke-width=1 d=format!("M {p},0 V{}", -graph_height)/>
+        <path fill="none" stroke="black" d=format!("M {p},0 V-5")/>
+        <path fill="none" stroke="black" d=format!("M {p},{} v5", -graph_height)/>
     }
 }
 
 fn make_y_tick(pos: f64, m: &Mapping, graph_width: f64) -> impl IntoView {
     let p = m.map_y(pos);
-    let path = format!("M {},{} H{}", 0, p, graph_width);
     view! {
         <text text-anchor="end" x=-5 y=p>{format!("{}", NiceFloat(pos))}</text>
-        <path fill="none" stroke="gray" stroke-width=0.5 d=path name=pos/>
+        <path fill="none" stroke="gray" stroke-width=1 d=format!("M 0,{p} H{graph_width}")/>
+        <path fill="none" stroke="black" d=format!("M 0,{p} H5")/>
+        <path fill="none" stroke="black" d=format!("M {graph_width},{p} h-5")/>
     }
 }
