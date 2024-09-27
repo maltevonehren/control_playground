@@ -42,7 +42,7 @@ pub fn App() -> impl IntoView {
     });
 
     view! {
-        <title>"Program Demo"</title>
+        <title>"Control Playground"</title>
         <div class="background">
             <div> /* logo area */ </div>
             <div class="header">

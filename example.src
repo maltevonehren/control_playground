@@ -1,0 +1,11 @@
+
+plant = tf([0, 0.1, 0.1], [1, -1.6, 0.7]);
+plant;
+
+tf2ss(plant);
+step(plant);
+
+Kp = 1.5;
+Ki = 1;
+controller = tf([Kp, -Kp + Ki], [1, -1]);
+controller;

@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
-use engine::state_space::DiscreteStateSpaceModel;
 use engine::transfer_function::DiscreteTransferFunction;
+use engine::{dynamic_system::step, state_space::DiscreteStateSpaceModel};
 use nalgebra::{DMatrix, DVector};
 
-use crate::ast::{Expression, Program, Statement};
+use crate::ast;
+use ast::{Expression, Program, Statement};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
@@ -25,11 +26,12 @@ impl From<std::fmt::Error> for Error {
 #[derive(Clone, Debug, PartialEq)]
 enum Value {
     String(String),
+    Float(f64),
+    Vector(DVector<f64>),
+    Matrix(DMatrix<f64>),
     BuiltInFunction(BuiltInFunction),
     TransferFunction(DiscreteTransferFunction),
     StateSpaceModel(DiscreteStateSpaceModel),
-    Vector(DVector<f64>),
-    Matrix(DMatrix<f64>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -43,11 +45,12 @@ impl From<&Value> for Output {
     fn from(value: &Value) -> Self {
         match value {
             Value::String(s) => Output::Text(s.clone()),
-            Value::BuiltInFunction(_) => todo!(),
-            Value::TransferFunction(tf) => Output::Text(tf.to_string()),
-            Value::StateSpaceModel(ss) => Output::Text(ss.to_string()),
             Value::Vector(data) => Output::Text(data.to_string()),
             Value::Matrix(data) => Output::Plot(data.clone()),
+            Value::Float(f) => Output::Text(f.to_string()),
+            Value::BuiltInFunction(_) => Output::Text("<builtinfunction>".to_string()),
+            Value::TransferFunction(tf) => Output::Text(tf.to_string()),
+            Value::StateSpaceModel(ss) => Output::Text(ss.to_string()),
         }
     }
 }
@@ -106,7 +109,42 @@ fn eval(
     let value = match expr {
         Identifier(id) => values.get(id).ok_or(Error::NullDeref)?.clone(),
         StringLiteral(s) => Value::String(s.clone()),
-        VectorLiteral(elements) => Value::Vector(DVector::from_vec(elements.clone())),
+        FloatLiteral(f) => Value::Float(*f),
+        VectorLiteral(elements) => {
+            let elements = elements
+                .iter()
+                .map(|e| match eval(e, values, exec_env) {
+                    Ok(Value::Float(f)) => Ok(f),
+                    Ok(_) => Err(Error::TypeError),
+                    Err(e) => Err(e),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Value::Vector(DVector::from_vec(elements))
+        }
+        UnOp(op, e) => {
+            use ast::UnOp::*;
+            let Value::Float(f) = eval(&e, values, exec_env)? else {
+                return Err(Error::TypeError);
+            };
+            match op {
+                Neg => Value::Float(-f),
+            }
+        }
+        BinOp(op, e1, e2) => {
+            use ast::BinOp::*;
+            let Value::Float(f1) = eval(&e1, values, exec_env)? else {
+                return Err(Error::TypeError);
+            };
+            let Value::Float(f2) = eval(&e2, values, exec_env)? else {
+                return Err(Error::TypeError);
+            };
+            match op {
+                Add => Value::Float(f1 + f2),
+                Sub => Value::Float(f1 - f2),
+                Mul => Value::Float(f1 * f2),
+                Div => Value::Float(f1 / f2),
+            }
+        }
         FunctionCall {
             function,
             arguments,
@@ -181,7 +219,7 @@ fn eval(
                         Value::StateSpaceModel(ss) => ss,
                         _ => return Err(Error::TypeError),
                     };
-                    let output = ss.step();
+                    let output = step(&ss);
                     Value::Matrix(output.insert_rows(0, 0, 0.)) // TODO: is there a better way to convert to DMatrix?
                 }
             }

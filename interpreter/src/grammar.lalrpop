@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use crate::ast::{Expression, Program, Statement};
+use crate::ast::*;
 
 grammar;
 
@@ -8,37 +8,44 @@ pub Program: Program = {
 };
 
 Statements: Vec<Statement> = {
-    <mut list:Statements> <c:Statement> ";" => {
-        list.push(c);
-        list
-    },
-    <Statement> ";" => vec![<>],
+    < (<Statement> ";") *> => <>,
 }
 
 pub(crate) Statement: Statement = {
     <Expression> => Statement::ExpressionStatement(<>),
-    <i:Identifier> "=" <e:Expression> => Statement::Assign(i.to_string(), e),
+    <name:Identifier> "=" <e:Expression> => Statement::Assign(name.to_string(), e),
 };
 
 pub(crate) Expression: Expression = {
-    <Identifier> => Expression::Identifier(<>.to_string()),
-    <r#""[^"]*""#> => Expression::StringLiteral(<>.strip_prefix(r#"""#).unwrap().strip_suffix(r#"""#).unwrap().to_string()),
-    <Vec> => Expression::VectorLiteral(<>),
+    #[precedence(level="0")] // Highest precedence
+    Term,
+    #[precedence(level="1")]
     <f:Expression> "(" <args:ExpressionList> ")" =>
         Expression::FunctionCall {
             function: f.into(),
             arguments: args,
         },
+    #[precedence(level="2")]
+    "-" <Expression> => Expression::UnOp(UnOp::Neg, <>.into()),
+    #[precedence(level="3")] #[assoc(side="left")]
+    <l:Expression> "*" <r:Expression> => Expression::BinOp(BinOp::Mul, l.into(), r.into()),
+    <l:Expression> "/" <r:Expression> => Expression::BinOp(BinOp::Div, l.into(), r.into()),
+    #[precedence(level="5")] #[assoc(side="left")]
+    <l:Expression> "+" <r:Expression> => Expression::BinOp(BinOp::Add, l.into(), r.into()),
+    <l:Expression> "-" <r:Expression> => Expression::BinOp(BinOp::Sub, l.into(), r.into()),
 };
 
-Vec: Vec<f64> = {
-    "[" <NumList> "]" => <>,
+Term: Expression = {
+    <Float> => Expression::FloatLiteral(<>),
+    <Identifier> => Expression::Identifier(<>.to_string()),
+    <r#""[^"]*""#> => Expression::StringLiteral(<>.strip_prefix(r#"""#).unwrap().strip_suffix(r#"""#).unwrap().to_string()),
+    "[" <ExpressionList> "]" => Expression::VectorLiteral(<>),
 };
 
 ExpressionList = Comma<Expression>;
-NumList = Comma<Num>;
+FloatList = Comma<Float>;
 
-Comma<T>: Vec<T> = { // (1)
+Comma<T>: Vec<T> = {
     <mut v:(<T> ",")*> <e:T?> => match e {
         None => v,
         Some(e) => {
@@ -48,7 +55,7 @@ Comma<T>: Vec<T> = { // (1)
     }
 };
 
-Num: f64 = {
+Float: f64 = {
     r"-?([0-9]+(\.[0-9]+)?)|(\.[0-9]+)" => f64::from_str(<>).unwrap(),
 };
 
