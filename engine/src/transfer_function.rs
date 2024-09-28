@@ -7,25 +7,34 @@ use crate::{state_space::DiscreteStateSpaceModel, NiceFloat};
 
 /// Discrete Time Transfer Function
 ///
-/// Invariant: `num.len() > 0 && den.len() > 0`
+/// Invariant: `num.len() > 0 && den.len() == num.len()`
 #[derive(Clone, Debug, PartialEq)]
 pub struct DiscreteTransferFunction {
+    /// numerator polynomial.
+    /// num[i] is the coefficient for z^(-i)
     num: DVector<f64>,
+    /// numerator polynomial.
+    /// den[j] is the coefficient for z^(-j)
     den: DVector<f64>,
 }
 
 impl DiscreteTransferFunction {
-    pub fn new(num: DVector<f64>, den: DVector<f64>) -> Option<Self> {
+    pub fn new(mut num: DVector<f64>, mut den: DVector<f64>) -> Option<Self> {
         if num.is_empty() || den.is_empty() {
             return None;
+        }
+        let numlen = num.len();
+        let denlen = den.len();
+        if numlen < denlen {
+            num = num.insert_rows(0, denlen - numlen, 0.0);
+        }
+        if denlen < numlen {
+            den = den.insert_rows(0, numlen - denlen, 0.0);
         }
         Some(Self { num, den })
     }
 
     pub fn convert_to_state_space(&self) -> Option<DiscreteStateSpaceModel> {
-        if self.den.len() < self.num.len() {
-            return None;
-        }
         let d0 = self.den[0]; // normalization coeff
         if d0 == 0. {
             return None;
@@ -68,31 +77,42 @@ impl fmt::Display for DiscreteTransferFunction {
             let mut out = String::new();
             let mut written = false;
             for (i, el) in vals.iter().enumerate() {
-                if *el == 0. {
+                if *el == 0.0 {
                     continue;
                 }
-                if written {
-                    if *el < 0. {
-                        write!(out, " - {}", NiceFloat(el.abs()))?;
+                if *el != 1.0 || i == 0 {
+                    if written {
+                        if *el < 0. {
+                            write!(out, " - {}", NiceFloat(el.abs()))?;
+                        } else {
+                            write!(out, " + {}", NiceFloat(el.abs()))?;
+                        }
                     } else {
-                        write!(out, " + {}", NiceFloat(el.abs()))?;
+                        write!(out, "{}", NiceFloat(*el))?;
                     }
-                } else {
-                    write!(out, "{}", NiceFloat(*el))?;
-                    written = true;
                 }
                 if i > 0 {
                     write!(out, " z^-{}", i)?;
                 }
+                written = true;
+            }
+            if !written {
+                write!(out, "0")?;
             }
             Ok(out)
         }
         let num = format_poly(&self.num)?;
+        let den_is_one = self.den[0] == 1.0 && self.den.iter().skip(1).all(|e| *e == 0.0);
         let den = format_poly(&self.den)?;
-        let len = num.len().max(den.len());
+        let mut len = num.len();
+        if !den_is_one {
+            len = len.max(den.len())
+        };
         writeln!(f, "{}{}", " ".repeat((len - num.len()) / 2), num)?;
-        writeln!(f, "{}", "-".repeat(len))?;
-        writeln!(f, "{}{}", " ".repeat((len - den.len()) / 2), den)?;
+        if !den_is_one {
+            writeln!(f, "{}", "-".repeat(len))?;
+            writeln!(f, "{}{}", " ".repeat((len - den.len()) / 2), den)?;
+        }
         Ok(())
     }
 }
