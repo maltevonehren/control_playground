@@ -1,11 +1,16 @@
+use std::fmt::Write;
+use std::rc::Rc;
+
 use engine::NiceFloat;
 use leptos::*;
 use leptos_use::{use_element_size, UseElementSizeReturn};
 use nalgebra::{DMatrix, Dim, MatrixView1xX};
-use std::fmt::Write;
 
 #[component]
-pub fn SVGGraph(#[prop(into)] data: Signal<DMatrix<f64>>, initial_height: f64) -> impl IntoView {
+pub fn SVGGraph(
+    #[prop(into)] data: Signal<Rc<DMatrix<f64>>>,
+    initial_height: f64,
+) -> impl IntoView {
     let el = create_node_ref::<html::Div>();
     let UseElementSizeReturn { width, height } = use_element_size(el);
 

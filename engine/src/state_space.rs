@@ -1,5 +1,7 @@
-use nalgebra::{DMatrix, DVector, RowDVector, SMatrix, Vector1};
+use nalgebra::{DMatrix, DVector, RowDVector, SMatrix};
 use std::fmt;
+
+use crate::dynamic_system::DiscreteSystem;
 
 /// Discrete Time SISO State Space Model
 ///
@@ -23,24 +25,19 @@ impl fmt::Display for DiscreteStateSpaceModel {
     }
 }
 
-impl DiscreteStateSpaceModel {
-    pub fn state_size(&self) -> usize {
+impl DiscreteSystem for DiscreteStateSpaceModel {
+    fn num_states(&self) -> usize {
         self.a.nrows()
     }
 
-    pub fn step(&self) -> RowDVector<f64> {
-        let mut x = DVector::zeros(self.state_size());
-        let steps = 35;
-        let mut output = RowDVector::zeros(steps + 1);
-        let u = 1.0;
-        for i in 0..steps {
-            // calculate y first so we can update x in place
-            let y = &self.c * &x + self.d * u;
-            x = &self.a * x + &self.b * u;
-            output.set_column(i, &Vector1::new(y[0]));
-        }
-        let y = &self.c * &x + self.d * u;
-        output.set_column(steps, &Vector1::new(y[0]));
-        output
+    fn update_states(&self, input: f64, mut states: nalgebra::DVectorViewMut<'_, f64>) {
+        // TODO avoid temp alloc
+        let new_states = &self.a * &states + &self.b * input;
+        states.set_column(0, &new_states);
+    }
+
+    fn calculate_output(&self, input: f64, states: nalgebra::DVectorView<'_, f64>) -> f64 {
+        let y = &self.c * states + self.d * input;
+        y[0]
     }
 }

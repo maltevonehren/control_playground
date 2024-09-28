@@ -40,7 +40,20 @@ Term: Expression = {
     <Identifier> => Expression::Identifier(<>.to_string()),
     <r#""[^"]*""#> => Expression::StringLiteral(<>.strip_prefix(r#"""#).unwrap().strip_suffix(r#"""#).unwrap().to_string()),
     "[" <ExpressionList> "]" => Expression::VectorLiteral(<>),
+    <SystemDef> => Expression::System(<>),
 };
+
+pub(crate) SystemDef: Vec<SystemItem> = {
+    "{" < (<SystemItem> ";") *> "}" => <>
+};
+
+SystemItem: SystemItem = {
+    <output_name:Identifier> "=" <item_name:Identifier> "(" <input_name:Identifier> ")" => SystemItem {
+        input_name: input_name.to_string(),
+        item_name: item_name.to_string(),
+        output_name: output_name.to_string(),
+    },
+}
 
 ExpressionList = Comma<Expression>;
 FloatList = Comma<Float>;

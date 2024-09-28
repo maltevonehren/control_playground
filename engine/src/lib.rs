@@ -1,9 +1,11 @@
 use std::fmt;
 
+// pub mod arx;
+pub mod dynamic_system;
 pub mod state_space;
 pub mod transfer_function;
 
-/// Helper function for displaying floats in a certain format
+/// Helper for displaying floats in a certain format
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct NiceFloat(pub f64);
 

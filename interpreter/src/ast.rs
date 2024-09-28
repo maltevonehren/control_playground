@@ -21,6 +21,14 @@ pub(crate) enum Expression {
         function: Box<Expression>,
         arguments: Vec<Expression>,
     },
+    System(Vec<SystemItem>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct SystemItem {
+    pub input_name: String,
+    pub item_name: String,
+    pub output_name: String,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

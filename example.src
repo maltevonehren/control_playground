@@ -1,11 +1,21 @@
 
-plant = tf([0, 0.1, 0.1], [1, -1.6, 0.7]);
+plant = tf([0, 0.5, 0.5], [1, -1.5, 0.7]);
 plant;
-
-tf2ss(plant);
 step(plant);
 
-Kp = 1.5;
-Ki = 1;
+Kp = 0.25;
+Ki = 0.05;
 controller = tf([Kp, -Kp + Ki], [1, -1]);
 controller;
+
+sys = {
+  c = controller(u);
+  p = plant(c);
+};
+sys;
+step(sys);
+
+
+mat = load("out.csv");
+mat;
+

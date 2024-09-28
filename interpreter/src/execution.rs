@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
+use engine::dynamic_system::{CompoundDiscreteSystem, DiscreteSystem};
 use engine::transfer_function::DiscreteTransferFunction;
 use engine::{dynamic_system::step, state_space::DiscreteStateSpaceModel};
 use nalgebra::{DMatrix, DVector};
@@ -27,18 +29,19 @@ impl From<std::fmt::Error> for Error {
 enum Value {
     String(String),
     Float(f64),
-    Vector(DVector<f64>),
-    Matrix(DMatrix<f64>),
+    Vector(Rc<DVector<f64>>),
+    Matrix(Rc<DMatrix<f64>>),
     BuiltInFunction(BuiltInFunction),
-    TransferFunction(DiscreteTransferFunction),
-    StateSpaceModel(DiscreteStateSpaceModel),
+    TransferFunction(Rc<DiscreteTransferFunction>),
+    StateSpaceModel(Rc<DiscreteStateSpaceModel>),
+    CompoundSystem(Rc<CompoundDiscreteSystem>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Output {
     Err(Error),
     Text(String),
-    Plot(DMatrix<f64>),
+    Plot(Rc<DMatrix<f64>>),
 }
 
 impl From<&Value> for Output {
@@ -51,6 +54,23 @@ impl From<&Value> for Output {
             Value::BuiltInFunction(_) => Output::Text("<builtinfunction>".to_string()),
             Value::TransferFunction(tf) => Output::Text(tf.to_string()),
             Value::StateSpaceModel(ss) => Output::Text(ss.to_string()),
+            Value::CompoundSystem(_) => Output::Text("<compoundsystem>".to_string()),
+        }
+    }
+}
+
+impl Value {
+    fn get_sytem(&self) -> Result<Rc<dyn DiscreteSystem>, Error> {
+        match self {
+            Value::TransferFunction(tf) => {
+                let ss = tf
+                    .convert_to_state_space()
+                    .ok_or(Error::Other("Could not convert to state space".to_string()))?;
+                Ok(Rc::new(ss))
+            }
+            Value::StateSpaceModel(s) => Ok(s.clone()),
+            Value::CompoundSystem(s) => Ok(s.clone()),
+            _ => Err(Error::TypeError),
         }
     }
 }
@@ -119,11 +139,11 @@ fn eval(
                     Err(e) => Err(e),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            Value::Vector(DVector::from_vec(elements))
+            Value::Vector(Rc::new(DVector::from_vec(elements)))
         }
         UnOp(op, e) => {
             use ast::UnOp::*;
-            let Value::Float(f) = eval(&e, values, exec_env)? else {
+            let Value::Float(f) = eval(e, values, exec_env)? else {
                 return Err(Error::TypeError);
             };
             match op {
@@ -132,10 +152,10 @@ fn eval(
         }
         BinOp(op, e1, e2) => {
             use ast::BinOp::*;
-            let Value::Float(f1) = eval(&e1, values, exec_env)? else {
+            let Value::Float(f1) = eval(e1, values, exec_env)? else {
                 return Err(Error::TypeError);
             };
-            let Value::Float(f2) = eval(&e2, values, exec_env)? else {
+            let Value::Float(f2) = eval(e2, values, exec_env)? else {
                 return Err(Error::TypeError);
             };
             match op {
@@ -180,7 +200,7 @@ fn eval(
                             m[(j, i)] = v.parse().unwrap();
                         }
                     }
-                    Value::Matrix(m)
+                    Value::Matrix(Rc::new(m))
                 }
                 TransferFunction => {
                     if num_args != 2 {
@@ -192,9 +212,9 @@ fn eval(
                     let Value::Vector(den) = eval(&arguments[1], values, exec_env)? else {
                         return Err(Error::TypeError);
                     };
-                    let tf = DiscreteTransferFunction::new(num, den)
+                    let tf = DiscreteTransferFunction::new((*num).clone(), (*den).clone())
                         .ok_or(Error::Other("Could not construct tf".to_string()))?;
-                    Value::TransferFunction(tf)
+                    Value::TransferFunction(Rc::new(tf))
                 }
                 Tf2Ss => {
                     if num_args != 1 {
@@ -206,23 +226,28 @@ fn eval(
                     let ss = tf
                         .convert_to_state_space()
                         .ok_or(Error::Other("Could not convert to state space".to_string()))?;
-                    Value::StateSpaceModel(ss)
+                    Value::StateSpaceModel(Rc::new(ss))
                 }
                 Step => {
                     if num_args != 1 {
                         return Err(Error::IncorectNumberOfArguments(1, num_args));
                     }
-                    let ss = match eval(&arguments[0], values, exec_env)? {
-                        Value::TransferFunction(tf) => tf
-                            .convert_to_state_space()
-                            .ok_or(Error::Other("Could not convert to state space".to_string()))?,
-                        Value::StateSpaceModel(ss) => ss,
-                        _ => return Err(Error::TypeError),
-                    };
-                    let output = step(&ss);
-                    Value::Matrix(output.insert_rows(0, 0, 0.)) // TODO: is there a better way to convert to DMatrix?
+                    let system = eval(&arguments[0], values, exec_env)?.get_sytem()?;
+                    let output = step(&*system);
+                    Value::Matrix(Rc::new(output.insert_rows(0, 0, 0.))) // TODO: is there a better way to convert to DMatrix?
                 }
             }
+        }
+        System(items) => {
+            let mut sub_systems = Vec::new();
+            for item in items {
+                let sub_system = values
+                    .get(&item.item_name)
+                    .ok_or(Error::NullDeref)?
+                    .get_sytem()?;
+                sub_systems.push(sub_system);
+            }
+            Value::CompoundSystem(Rc::new(CompoundDiscreteSystem { sub_systems }))
         }
     };
     Ok(value)
