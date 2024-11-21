@@ -27,14 +27,6 @@ pub fn SVGGraph(
     let x_min_max = create_memo(move |_| (0.0, data.get().ncols() as f64 - 1.0));
     let y_min_max = create_memo(move |_| (data.get().min(), data.get().max()));
 
-    let mapping = create_memo(move |_| {
-        Mapping::new(
-            x_min_max.get(),
-            y_min_max.get(),
-            graph_width(),
-            graph_height(),
-        )
-    });
     let x_axis = create_memo(move |_| {
         let max_num_ticks = (graph_width() / tightest_x_tick_spacing).floor() as usize + 1;
         Axis::new(x_min_max.get(), max_num_ticks)
@@ -42,6 +34,9 @@ pub fn SVGGraph(
     let y_axis = create_memo(move |_| {
         let max_num_ticks = (graph_height() / tightest_y_tick_spacing).floor() as usize + 1;
         Axis::new(y_min_max.get(), max_num_ticks)
+    });
+    let mapping = create_memo(move |_| {
+        Mapping::new(x_axis.get(), y_axis.get(), graph_width(), graph_height())
     });
     view! {
         <div node_ref=el style:overflow="hidden" style:resize="vertical" style:height=format!("{initial_height}px")>
@@ -89,17 +84,12 @@ struct Mapping {
 }
 
 impl Mapping {
-    fn new(
-        (x_min, x_max): (f64, f64),
-        (y_min, y_max): (f64, f64),
-        width: f64,
-        heigth: f64,
-    ) -> Self {
+    fn new(x: Axis, y: Axis, width: f64, heigth: f64) -> Self {
         Self {
-            x_scale: width / (x_max - x_min),
-            y_scale: heigth / (y_max - y_min),
-            x_min,
-            y_min,
+            x_scale: width / (x.max - x.min),
+            y_scale: heigth / (y.max - y.min),
+            x_min: x.min,
+            y_min: y.min,
         }
     }
 
@@ -131,11 +121,12 @@ struct Axis {
 }
 
 impl Axis {
-    fn new((min, max): (f64, f64), max_num_ticks: usize) -> Self {
-        let mut delta = max - min;
-        if delta == 0.0 {
-            delta = 1.0;
+    fn new((mut min, mut max): (f64, f64), max_num_ticks: usize) -> Self {
+        if max == min {
+            min -= 0.5;
+            max += 0.5;
         }
+        let delta = max - min;
         // TODO: make sure max_num_ticks is actually respected
         let scale = (delta / (max_num_ticks as f64 + 1.0)).log10().floor();
         let factor = (10f64).powf(scale);
@@ -153,8 +144,8 @@ impl Axis {
     }
 
     fn ticks(&self) -> impl Iterator<Item = f64> {
-        let t_min = (self.min / self.step).ceil() as usize;
-        let t_max = (self.max / self.step).floor() as usize;
+        let t_min = (self.min / self.step).ceil() as isize;
+        let t_max = (self.max / self.step).floor() as isize;
         let step = self.step;
         (t_min..=t_max).map(move |t| t as f64 * step)
     }
