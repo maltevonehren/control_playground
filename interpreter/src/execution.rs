@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use engine::dynamic_system::{CompoundDiscreteSystem, DiscreteSystem};
+use engine::dynamic_system::{Simulation, SubSystem};
+use engine::state_space::DiscreteStateSpaceModel;
 use engine::transfer_function::DiscreteTransferFunction;
-use engine::{dynamic_system::step, state_space::DiscreteStateSpaceModel};
 use nalgebra::{DMatrix, DVector};
 
 use crate::ast;
@@ -69,7 +70,6 @@ impl Value {
                 Ok(Rc::new(ss))
             }
             Value::StateSpaceModel(s) => Ok(s.clone()),
-            Value::CompoundSystem(s) => Ok(s.clone()),
             _ => Err(Error::TypeError),
         }
     }
@@ -232,8 +232,17 @@ fn eval(
                     if num_args != 1 {
                         return Err(Error::IncorectNumberOfArguments(1, num_args));
                     }
-                    let system = eval(&arguments[0], values, exec_env)?.get_sytem()?;
-                    let output = step(&*system);
+                    let system = eval(&arguments[0], values, exec_env)?;
+                    let system = match system {
+                        Value::TransferFunction(_) | Value::StateSpaceModel(_) => {
+                            return Err(Error::Other("TODO".to_string()))
+                        }
+                        Value::CompoundSystem(s) => s,
+                        _ => return Err(Error::TypeError),
+                    };
+                    let sim = Simulation::new(&system)
+                        .ok_or(Error::Other("could not init sim".to_string()))?;
+                    let output = sim.execute();
                     Value::Matrix(Rc::new(output.insert_rows(0, 0, 0.))) // TODO: is there a better way to convert to DMatrix?
                 }
             }
@@ -241,13 +250,19 @@ fn eval(
         System(items) => {
             let mut sub_systems = Vec::new();
             for item in items {
-                let sub_system = values
+                let system = values
                     .get(&item.item_name)
                     .ok_or(Error::NullDeref)?
                     .get_sytem()?;
-                sub_systems.push(sub_system);
+                sub_systems.push(SubSystem {
+                    system,
+                    input_name: item.input_name.clone(),
+                    output_name: item.output_name.clone(),
+                });
             }
-            Value::CompoundSystem(Rc::new(CompoundDiscreteSystem { sub_systems }))
+            Value::CompoundSystem(Rc::new(
+                CompoundDiscreteSystem::new(sub_systems).map_err(Error::Other)?,
+            ))
         }
     };
     Ok(value)

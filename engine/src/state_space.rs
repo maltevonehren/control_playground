@@ -1,4 +1,4 @@
-use nalgebra::{DMatrix, DVector, RowDVector, SMatrix};
+use nalgebra::{DMatrix, DVector, DVectorView, DVectorViewMut, RowDVector, SMatrix};
 use std::fmt;
 
 use crate::dynamic_system::DiscreteSystem;
@@ -26,18 +26,21 @@ impl fmt::Display for DiscreteStateSpaceModel {
 }
 
 impl DiscreteSystem for DiscreteStateSpaceModel {
-    fn num_states(&self) -> usize {
+    fn state_size(&self) -> usize {
         self.a.nrows()
     }
 
-    fn update_states(&self, input: f64, mut states: nalgebra::DVectorViewMut<'_, f64>) {
+    fn update_state(&self, input: f64, mut state: DVectorViewMut<'_, f64>) {
         // TODO avoid temp alloc
-        let new_states = &self.a * &states + &self.b * input;
-        states.set_column(0, &new_states);
+        let new_state = &self.a * &state + &self.b * input;
+        state.set_column(0, &new_state);
     }
 
-    fn calculate_output(&self, input: f64, states: nalgebra::DVectorView<'_, f64>) -> f64 {
-        let y = &self.c * states + self.d * input;
-        y[0]
+    fn calculate_output(&self, input: f64, state: DVectorView<'_, f64>, output: &mut f64) {
+        *output = (&self.c * state + self.d * input)[0];
+    }
+
+    fn has_feedthrough(&self) -> bool {
+        self.d.iter().any(|e| *e != 0.0)
     }
 }
