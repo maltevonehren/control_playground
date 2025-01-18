@@ -14,10 +14,11 @@ use ast::{Expression, Program, Statement};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     IO(std::fmt::Error),
-    NullDeref,
+    NullDeref(Rc<str>),
+    UnknownFunction(Rc<str>),
     TypeError,
     IncorectNumberOfArguments(usize, usize),
-    Other(String),
+    Other(Rc<str>),
 }
 
 impl From<std::fmt::Error> for Error {
@@ -124,7 +125,7 @@ fn eval(
 ) -> Result<Value, Error> {
     use Expression::*;
     let value = match expr {
-        Identifier(id) => values.get(id).ok_or(Error::NullDeref)?.clone(),
+        Identifier(id) => values.get(id).ok_or(Error::NullDeref(id.clone()))?.clone(),
         StringLiteral(s) => Value::String(s.clone()),
         FloatLiteral(f) => Value::Float(*f),
         VectorLiteral(elements) => {
@@ -167,7 +168,12 @@ fn eval(
             arguments,
         } => {
             use BuiltInFunction::*;
-            let Value::BuiltInFunction(function) = eval(function, values, exec_env)? else {
+            let Value::BuiltInFunction(function) =
+                eval(function, values, exec_env).map_err(|e| match e {
+                    Error::NullDeref(id) => Error::UnknownFunction(id),
+                    e => e,
+                })?
+            else {
                 return Err(Error::TypeError);
             };
             let num_args = arguments.len();
@@ -179,16 +185,16 @@ fn eval(
                     let Value::String(file_name) = eval(&arguments[0], values, exec_env)? else {
                         return Err(Error::TypeError);
                     };
-                    let text = exec_env
-                        .read_file(&file_name)
-                        .ok_or(Error::Other(format!("file {file_name} could not be read")))?;
+                    let text = exec_env.read_file(&file_name).ok_or(Error::Other(
+                        format!("file {file_name} could not be read").into(),
+                    ))?;
                     let mut rdr = csv::ReaderBuilder::new()
                         .has_headers(false)
                         .from_reader(text.as_bytes());
                     let mut m = DMatrix::zeros(0, 0);
                     for (i, result) in rdr.records().enumerate() {
-                        let record = result
-                            .map_err(|_| Error::Other("Error while parsing csv".to_string()))?;
+                        let record =
+                            result.map_err(|_| Error::Other("Error while parsing csv".into()))?;
                         if i == 0 {
                             m = m.resize(record.len(), 0, 0.);
                         }
@@ -210,7 +216,7 @@ fn eval(
                         return Err(Error::TypeError);
                     };
                     let tf = DiscreteTransferFunction::new((*num).clone(), (*den).clone())
-                        .ok_or(Error::Other("Could not construct tf".to_string()))?;
+                        .ok_or(Error::Other("Could not construct tf".into()))?;
                     Value::TransferFunction(Rc::new(tf))
                 }
                 Tf2Ss => {
@@ -222,7 +228,7 @@ fn eval(
                     };
                     let ss = tf
                         .convert_to_state_space()
-                        .ok_or(Error::Other("Could not convert to state space".to_string()))?;
+                        .ok_or(Error::Other("Could not convert to state space".into()))?;
                     Value::StateSpaceModel(Rc::new(ss))
                 }
                 Step => {
@@ -231,14 +237,22 @@ fn eval(
                     }
                     let system = eval(&arguments[0], values, exec_env)?;
                     let system = match system {
-                        Value::TransferFunction(_) | Value::StateSpaceModel(_) => {
-                            return Err(Error::Other("TODO".to_string()))
-                        }
                         Value::CompoundSystem(s) => s,
-                        _ => return Err(Error::TypeError),
+                        other => {
+                            let Ok(block) = other.get_sytem() else {
+                                return Err(Error::TypeError);
+                            };
+                            CompoundSystem::new(vec![CompoundSystemComponentDefinition {
+                                block,
+                                name: "".into(),
+                                reads_input_from: "u".into(),
+                            }])
+                            .map_err(Error::Other)?
+                            .into()
+                        }
                     };
                     let sim = Simulation::new(&system)
-                        .ok_or(Error::Other("could not init sim".to_string()))?;
+                        .ok_or(Error::Other("could not init sim".into()))?;
                     let output = sim.execute();
                     Value::Matrix(Rc::new(output.insert_rows(0, 0, 0.))) // TODO: is there a better way to convert to DMatrix?
                 }
@@ -249,7 +263,7 @@ fn eval(
             for item in items {
                 let system = values
                     .get(&item.item_name)
-                    .ok_or(Error::NullDeref)?
+                    .ok_or(Error::NullDeref(item.item_name.clone()))?
                     .get_sytem()?;
                 sub_systems.push(CompoundSystemComponentDefinition {
                     block: system,

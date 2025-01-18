@@ -53,6 +53,11 @@ SystemItem: SystemItem = {
         item_name: item_name.into(),
         output_name: output_name.into(),
     },
+    <item_name:Identifier> "(" <input_name:Identifier> ")" => SystemItem {
+        input_name: input_name.into(),
+        item_name: item_name.into(),
+        output_name: item_name.into(),
+    },
 }
 
 ExpressionList = Comma<Expression>;

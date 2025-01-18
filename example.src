@@ -9,13 +9,11 @@ controller = tf([Kp, -Kp + Ki], [1, -1]);
 controller;
 
 sys = {
-  c = controller(u);
-  p = plant(c);
+  controller(u);
+  p = plant(controller);
 };
 sys;
 step(sys);
 
 
-mat = load("out.csv");
-mat;
-
+load("out.csv");

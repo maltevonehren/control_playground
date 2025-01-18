@@ -179,13 +179,13 @@ pub struct CompoundSystemComponentDefinition {
 }
 
 impl CompoundSystem {
-    pub fn new(components: Vec<CompoundSystemComponentDefinition>) -> Result<Self, String> {
+    pub fn new(components: Vec<CompoundSystemComponentDefinition>) -> Result<Self, Rc<str>> {
         // do name resolution
         let mut signal_names = HashMap::new();
         signal_names.insert("u".into(), 0);
         for (i, sub_system) in components.iter().enumerate() {
             if signal_names.contains_key(&sub_system.name) {
-                return Err(format!("duplicate name {}", sub_system.name));
+                return Err(format!("duplicate name {}", sub_system.name).into());
             }
             signal_names.insert(sub_system.name.clone(), i + 1);
         }
