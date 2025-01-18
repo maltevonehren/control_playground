@@ -1,8 +1,6 @@
 use nalgebra::{DMatrix, DVector, DVectorView, DVectorViewMut, RowDVector, SMatrix};
 use std::fmt;
 
-use crate::dynamic_system::DiscreteSystem;
-
 /// Discrete Time SISO State Space Model
 ///
 /// x_(k+1) = a * x_k + b * u_k
@@ -25,22 +23,22 @@ impl fmt::Display for DiscreteStateSpaceModel {
     }
 }
 
-impl DiscreteSystem for DiscreteStateSpaceModel {
-    fn state_size(&self) -> usize {
+impl DiscreteStateSpaceModel {
+    pub fn state_size(&self) -> usize {
         self.a.nrows()
     }
 
-    fn update_state(&self, input: f64, mut state: DVectorViewMut<'_, f64>) {
+    pub fn update_state(&self, input: f64, mut state: DVectorViewMut<'_, f64>) {
         // TODO avoid temp alloc
         let new_state = &self.a * &state + &self.b * input;
         state.set_column(0, &new_state);
     }
 
-    fn calculate_output(&self, input: f64, state: DVectorView<'_, f64>, output: &mut f64) {
+    pub fn calculate_output(&self, input: f64, state: DVectorView<'_, f64>, output: &mut f64) {
         *output = (&self.c * state + self.d * input)[0];
     }
 
-    fn has_feedthrough(&self) -> bool {
+    pub fn has_feedthrough(&self) -> bool {
         self.d.iter().any(|e| *e != 0.0)
     }
 }

@@ -4,70 +4,89 @@ use std::fmt;
 use std::ops::Range;
 use std::rc::Rc;
 
-use nalgebra::{DVector, DVectorView, DVectorViewMut, RowDVector, Vector1};
+use nalgebra::{DVector, RowDVector, Vector1};
 
-// pub enum System {
-//     Single(Rc<dyn DiscreteSystem>),
-//     Coumpound(Rc<CompoundDiscreteSystem>),
-// }
+use crate::state_space::DiscreteStateSpaceModel;
+use crate::transfer_function::DiscreteTransferFunction;
 
-pub trait DiscreteSystem: std::fmt::Debug {
-    fn state_size(&self) -> usize;
-    // fn input_size(&self) -> usize;
-    // fn output_size(&self) -> usize;
-    fn has_feedthrough(&self) -> bool;
+#[derive(Clone, Debug, PartialEq)]
+pub enum SystemBlock {
+    StateSpace(Rc<DiscreteStateSpaceModel>),
+    TransferFunction(Rc<DiscreteTransferFunction>),
+    // SubSystem(Rc<CompoundDiscreteSystem>),
+}
 
-    // TODO: MIMO
-    fn calculate_output(&self, input: f64, state: DVectorView<'_, f64>, output: &mut f64);
-    fn update_state(&self, input: f64, state: DVectorViewMut<'_, f64>);
+impl fmt::Display for SystemBlock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SystemBlock::StateSpace(ss) => ss.fmt(f),
+            SystemBlock::TransferFunction(tf) => tf.fmt(f),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct Simulation {
-    systems: Vec<(Rc<dyn DiscreteSystem>, Range<usize>)>,
+    blocks: Vec<SimulationBlock>,
+    execution_plan: Vec<ExecutionStep>,
     state_size: usize,
     signals_size: usize,
-    execution_plan: Vec<ExecutionStep>,
+}
+
+#[derive(Clone, Debug)]
+struct SimulationBlock {
+    executable: Rc<DiscreteStateSpaceModel>,
+    state_mapping: Range<usize>,
+    reads_input_from: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
 enum ExecutionStep {
     CalculateOutput {
         system_id: usize,
-        input_position: usize,
         output_position: usize,
     },
     UpdateState {
         system_id: usize,
-        input_position: usize,
     },
 }
 
 impl Simulation {
-    pub fn new(system: &CompoundDiscreteSystem) -> Option<Self> {
-        let mut individual_state_mapping = vec![];
+    pub fn new(system: &CompoundSystem) -> Option<Self> {
+        let num_signals = system.components.len() + 1;
+
+        let mut blocks = vec![];
         let mut state_size = 0;
-        for (sub_system, _) in &system.sub_systems {
-            let sub_system_state_count = sub_system.system.state_size();
-            individual_state_mapping.push(state_size..state_size + sub_system_state_count);
-            state_size += sub_system_state_count;
-        }
+        let mut dependencies: Vec<Vec<usize>> = vec![];
+        dependencies.resize(num_signals, vec![]);
 
         // build execution graph
         // for now: calculate all signals first, then update discrete states.
         // Can be optimized later to use less intermediate memory.
 
-        let num_signals = system.sub_systems.len() + 1;
-        // dependency graph
-        let mut dependencies: Vec<Vec<usize>> = vec![];
-        dependencies.resize(num_signals, vec![]);
-        for (i, (sub_system, input_index)) in system.sub_systems.iter().enumerate() {
-            if sub_system.system.has_feedthrough() {
-                dependencies[i].push(*input_index);
+        for (i, component) in system.components.iter().enumerate() {
+            let executable = match &component.block {
+                SystemBlock::StateSpace(ss) => ss.clone(),
+                SystemBlock::TransferFunction(tf) => {
+                    let b = tf.convert_to_state_space()?;
+                    Rc::new(b)
+                }
+            };
+            let sub_system_state_count = executable.state_size();
+            let state_mapping = (state_size)..(state_size + sub_system_state_count);
+
+            if executable.has_feedthrough() {
+                dependencies[i].push(component.reads_input_from);
             }
+            blocks.push(SimulationBlock {
+                executable,
+                state_mapping,
+                reads_input_from: component.reads_input_from,
+            });
+
+            state_size += sub_system_state_count;
         }
 
-        let mut execution_plan = vec![];
         // TODO: topological sort
         // let work_set: Vec<usize> = dependencies
         //     .iter()
@@ -78,29 +97,22 @@ impl Simulation {
         // while let Some(next) = work_set.pop() {
         //     execution_plan.push(next);
         // }
-        for (i, (_, get_input_from)) in system.sub_systems.iter().enumerate() {
+
+        let mut execution_plan = vec![];
+        for i in 0..blocks.len() {
             execution_plan.push(ExecutionStep::CalculateOutput {
                 system_id: i,
-                input_position: *get_input_from,
                 output_position: i + 1,
             });
         }
-        for (i, (sub_system, get_input_from)) in system.sub_systems.iter().enumerate() {
-            if sub_system.system.state_size() > 0 {
-                execution_plan.push(ExecutionStep::UpdateState {
-                    system_id: i,
-                    input_position: *get_input_from,
-                });
+        for (i, block) in blocks.iter().enumerate() {
+            if block.executable.state_size() > 0 {
+                execution_plan.push(ExecutionStep::UpdateState { system_id: i });
             }
         }
 
         Some(Self {
-            systems: system
-                .sub_systems
-                .iter()
-                .enumerate()
-                .map(|(i, ss)| (ss.0.system.clone(), individual_state_mapping[i].clone()))
-                .collect(),
+            blocks,
             state_size,
             signals_size: num_signals,
             execution_plan,
@@ -121,24 +133,20 @@ impl Simulation {
                 match step {
                     ExecutionStep::CalculateOutput {
                         system_id,
-                        input_position,
                         output_position,
                     } => {
-                        let (system, state_position) = &self.systems[*system_id];
-                        system.calculate_output(
-                            signals[*input_position],
-                            states.rows(state_position.start, state_position.len()),
+                        let block = &self.blocks[*system_id];
+                        block.executable.calculate_output(
+                            signals[block.reads_input_from],
+                            states.rows(block.state_mapping.start, block.state_mapping.len()),
                             &mut signals[*output_position],
                         );
                     }
-                    ExecutionStep::UpdateState {
-                        system_id,
-                        input_position,
-                    } => {
-                        let (system, state_position) = &self.systems[*system_id];
-                        system.update_state(
-                            signals[*input_position],
-                            states.rows_mut(state_position.start, state_position.len()),
+                    ExecutionStep::UpdateState { system_id } => {
+                        let block = &self.blocks[*system_id];
+                        block.executable.update_state(
+                            signals[block.reads_input_from],
+                            states.rows_mut(block.state_mapping.start, block.state_mapping.len()),
                         );
                     }
                 };
@@ -150,53 +158,51 @@ impl Simulation {
     }
 }
 
-#[derive(Clone)]
-pub struct SubSystem {
-    pub system: Rc<dyn DiscreteSystem>,
-    pub input_name: String,
-    pub output_name: String,
-}
-
 /// A system consisting of multiple subsystems
-#[derive(Clone)]
-pub struct CompoundDiscreteSystem {
-    sub_systems: Vec<(SubSystem, usize)>,
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompoundSystem {
+    pub components: Vec<CompoundSystemComponent>,
 }
 
-impl fmt::Debug for CompoundDiscreteSystem {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
-    }
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompoundSystemComponent {
+    pub block: SystemBlock,
+    pub name: Rc<str>,
+    pub reads_input_from: usize,
 }
 
-impl PartialEq for CompoundDiscreteSystem {
-    fn eq(&self, _other: &Self) -> bool {
-        todo!()
-    }
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompoundSystemComponentDefinition {
+    pub block: SystemBlock,
+    pub name: Rc<str>,
+    pub reads_input_from: Rc<str>,
 }
 
-impl CompoundDiscreteSystem {
-    pub fn new(sub_systems: Vec<SubSystem>) -> Result<Self, String> {
+impl CompoundSystem {
+    pub fn new(components: Vec<CompoundSystemComponentDefinition>) -> Result<Self, String> {
         // do name resolution
         let mut signal_names = HashMap::new();
-        signal_names.insert("u".to_string(), 0);
-        for (i, sub_system) in sub_systems.iter().enumerate() {
-            if signal_names.contains_key(&sub_system.output_name) {
-                return Err(format!("duplicate output name {}", sub_system.output_name));
+        signal_names.insert("u".into(), 0);
+        for (i, sub_system) in components.iter().enumerate() {
+            if signal_names.contains_key(&sub_system.name) {
+                return Err(format!("duplicate name {}", sub_system.name));
             }
-            signal_names.insert(sub_system.output_name.clone(), i + 1);
+            signal_names.insert(sub_system.name.clone(), i + 1);
         }
 
-        let mut sub_systems_with_input = Vec::with_capacity(sub_systems.len());
-        for sub_system in sub_systems {
-            let gets_input_from = signal_names
-                .get(&sub_system.input_name)
-                .ok_or(format!("signal {} does not exist", &sub_system.input_name))?;
-            sub_systems_with_input.push((sub_system.clone(), *gets_input_from));
-        }
+        let components = components
+            .into_iter()
+            .map(|c| {
+                Ok(CompoundSystemComponent {
+                    block: c.block,
+                    name: c.name,
+                    reads_input_from: *signal_names
+                        .get(&c.reads_input_from)
+                        .ok_or(format!("signal {} does not exist", &c.reads_input_from))?,
+                })
+            })
+            .collect::<Result<_, String>>()?;
 
-        Ok(Self {
-            sub_systems: sub_systems_with_input,
-        })
+        Ok(Self { components })
     }
 }

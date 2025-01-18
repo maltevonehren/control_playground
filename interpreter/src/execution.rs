@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use engine::dynamic_system::{CompoundDiscreteSystem, DiscreteSystem};
-use engine::dynamic_system::{Simulation, SubSystem};
+use engine::dynamic_system::{
+    CompoundSystem, CompoundSystemComponentDefinition, Simulation, SystemBlock,
+};
 use engine::state_space::DiscreteStateSpaceModel;
 use engine::transfer_function::DiscreteTransferFunction;
 use nalgebra::{DMatrix, DVector};
@@ -28,48 +29,44 @@ impl From<std::fmt::Error> for Error {
 /// Runtime Value
 #[derive(Clone, Debug, PartialEq)]
 enum Value {
-    String(String),
+    String(Rc<str>),
     Float(f64),
     Vector(Rc<DVector<f64>>),
     Matrix(Rc<DMatrix<f64>>),
     BuiltInFunction(BuiltInFunction),
     TransferFunction(Rc<DiscreteTransferFunction>),
     StateSpaceModel(Rc<DiscreteStateSpaceModel>),
-    CompoundSystem(Rc<CompoundDiscreteSystem>),
+    CompoundSystem(Rc<CompoundSystem>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Output {
     Err(Error),
-    Text(String),
+    Text(Rc<str>),
     Plot(Rc<DMatrix<f64>>),
+    System(Rc<CompoundSystem>),
 }
 
 impl From<&Value> for Output {
     fn from(value: &Value) -> Self {
         match value {
             Value::String(s) => Output::Text(s.clone()),
-            Value::Vector(data) => Output::Text(data.to_string()),
+            Value::Vector(data) => Output::Text(data.to_string().into()),
             Value::Matrix(data) => Output::Plot(data.clone()),
-            Value::Float(f) => Output::Text(f.to_string()),
-            Value::BuiltInFunction(_) => Output::Text("<builtinfunction>".to_string()),
-            Value::TransferFunction(tf) => Output::Text(tf.to_string()),
-            Value::StateSpaceModel(ss) => Output::Text(ss.to_string()),
-            Value::CompoundSystem(_) => Output::Text("<compoundsystem>".to_string()),
+            Value::Float(f) => Output::Text(f.to_string().into()),
+            Value::BuiltInFunction(_) => Output::Text("<builtinfunction>".to_string().into()),
+            Value::TransferFunction(tf) => Output::Text(tf.to_string().into()),
+            Value::StateSpaceModel(ss) => Output::Text(ss.to_string().into()),
+            Value::CompoundSystem(s) => Output::System(s.clone()),
         }
     }
 }
 
 impl Value {
-    fn get_sytem(&self) -> Result<Rc<dyn DiscreteSystem>, Error> {
+    fn get_sytem(&self) -> Result<SystemBlock, Error> {
         match self {
-            Value::TransferFunction(tf) => {
-                let ss = tf
-                    .convert_to_state_space()
-                    .ok_or(Error::Other("Could not convert to state space".to_string()))?;
-                Ok(Rc::new(ss))
-            }
-            Value::StateSpaceModel(s) => Ok(s.clone()),
+            Value::TransferFunction(tf) => Ok(SystemBlock::TransferFunction(tf.clone())),
+            Value::StateSpaceModel(ss) => Ok(SystemBlock::StateSpace(ss.clone())),
             _ => Err(Error::TypeError),
         }
     }
@@ -87,13 +84,13 @@ pub trait Env {
     fn read_file(&self, name: &str) -> Option<String>;
 }
 
-fn get_default_values() -> HashMap<String, Value> {
+fn get_default_values() -> HashMap<Rc<str>, Value> {
     use BuiltInFunction::*;
-    let mut values: HashMap<String, Value> = HashMap::new();
-    values.insert("load".to_owned(), Value::BuiltInFunction(Load));
-    values.insert("tf".to_owned(), Value::BuiltInFunction(TransferFunction));
-    values.insert("tf2ss".to_owned(), Value::BuiltInFunction(Tf2Ss));
-    values.insert("step".to_owned(), Value::BuiltInFunction(Step));
+    let mut values = HashMap::new();
+    values.insert("load".into(), Value::BuiltInFunction(Load));
+    values.insert("tf".into(), Value::BuiltInFunction(TransferFunction));
+    values.insert("tf2ss".into(), Value::BuiltInFunction(Tf2Ss));
+    values.insert("step".into(), Value::BuiltInFunction(Step));
     values
 }
 
@@ -110,7 +107,7 @@ pub fn execute(program: &Program, exec_env: &impl Env) -> Vec<Output> {
             Assign(id, expr) => {
                 match eval(expr, &values, exec_env) {
                     Ok(value) => {
-                        values.insert(id.to_string(), value);
+                        values.insert(id.clone(), value);
                     }
                     Err(e) => output.push(Output::Err(e)),
                 };
@@ -122,7 +119,7 @@ pub fn execute(program: &Program, exec_env: &impl Env) -> Vec<Output> {
 
 fn eval(
     expr: &Expression,
-    values: &HashMap<String, Value>,
+    values: &HashMap<Rc<str>, Value>,
     exec_env: &impl Env,
 ) -> Result<Value, Error> {
     use Expression::*;
@@ -254,14 +251,14 @@ fn eval(
                     .get(&item.item_name)
                     .ok_or(Error::NullDeref)?
                     .get_sytem()?;
-                sub_systems.push(SubSystem {
-                    system,
-                    input_name: item.input_name.clone(),
-                    output_name: item.output_name.clone(),
+                sub_systems.push(CompoundSystemComponentDefinition {
+                    block: system,
+                    reads_input_from: item.input_name.clone(),
+                    name: item.output_name.clone(),
                 });
             }
             Value::CompoundSystem(Rc::new(
-                CompoundDiscreteSystem::new(sub_systems).map_err(Error::Other)?,
+                CompoundSystem::new(sub_systems).map_err(Error::Other)?,
             ))
         }
     };

@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Program {
     pub(crate) statements: Vec<Statement>,
@@ -6,13 +8,13 @@ pub struct Program {
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) enum Statement {
     ExpressionStatement(Expression),
-    Assign(String, Expression),
+    Assign(Rc<str>, Expression),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Expression {
-    Identifier(String),
-    StringLiteral(String),
+    Identifier(Rc<str>),
+    StringLiteral(Rc<str>),
     FloatLiteral(f64),
     VectorLiteral(Vec<Expression>),
     UnOp(UnOp, Box<Expression>),
@@ -26,9 +28,9 @@ pub(crate) enum Expression {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SystemItem {
-    pub input_name: String,
-    pub item_name: String,
-    pub output_name: String,
+    pub input_name: Rc<str>,
+    pub item_name: Rc<str>,
+    pub output_name: Rc<str>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

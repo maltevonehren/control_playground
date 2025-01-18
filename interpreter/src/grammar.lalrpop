@@ -13,7 +13,7 @@ Statements: Vec<Statement> = {
 
 pub(crate) Statement: Statement = {
     <Expression> => Statement::ExpressionStatement(<>),
-    <name:Identifier> "=" <e:Expression> => Statement::Assign(name.to_string(), e),
+    <name:Identifier> "=" <e:Expression> => Statement::Assign(name.into(), e),
 };
 
 pub(crate) Expression: Expression = {
@@ -37,8 +37,8 @@ pub(crate) Expression: Expression = {
 
 Term: Expression = {
     <Float> => Expression::FloatLiteral(<>),
-    <Identifier> => Expression::Identifier(<>.to_string()),
-    <r#""[^"]*""#> => Expression::StringLiteral(<>.strip_prefix(r#"""#).unwrap().strip_suffix(r#"""#).unwrap().to_string()),
+    <Identifier> => Expression::Identifier(<>.into()),
+    <r#""[^"]*""#> => Expression::StringLiteral(<>.strip_prefix(r#"""#).unwrap().strip_suffix(r#"""#).unwrap().into()),
     "[" <ExpressionList> "]" => Expression::VectorLiteral(<>),
     <SystemDef> => Expression::System(<>),
 };
@@ -49,9 +49,9 @@ pub(crate) SystemDef: Vec<SystemItem> = {
 
 SystemItem: SystemItem = {
     <output_name:Identifier> "=" <item_name:Identifier> "(" <input_name:Identifier> ")" => SystemItem {
-        input_name: input_name.to_string(),
-        item_name: item_name.to_string(),
-        output_name: output_name.to_string(),
+        input_name: input_name.into(),
+        item_name: item_name.into(),
+        output_name: output_name.into(),
     },
 }
 

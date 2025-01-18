@@ -1,3 +1,4 @@
+// Clippy gets confused by the leptos component macro
 #![allow(clippy::needless_lifetimes)]
 
 use codee::string::FromToStringCodec;
@@ -7,11 +8,14 @@ use leptos_use::storage::use_local_storage;
 use web_sys::Event;
 
 use storage::StorageSidebar;
-use svg_graph::SVGGraph;
+use svg_plot::SVGPlot;
+
+use crate::svg_system_diagram::SVGSystemDiagram;
 
 mod js_types;
 mod storage;
-mod svg_graph;
+mod svg_plot;
+mod svg_system_diagram;
 
 struct ExecEnv {}
 
@@ -103,7 +107,8 @@ pub fn OutputElement(element: interpreter::execution::Output) -> impl IntoView {
             match element {
                 Err(e) => view!{ <span class="error"> { format!("{e:?}") } </span> }.into_view(),
                 Text(t) => t.trim_end().to_string().into_view(),
-                Plot(data) => view!{ <SVGGraph data={move || data.clone()} initial_height=300.0 /> },
+                Plot(data) => view!{ <SVGPlot data={move || data.clone()} initial_height=300.0 /> },
+                System(sys) => view!{ <SVGSystemDiagram sys=sys.clone() /> },
             } }
         </div>
     }
