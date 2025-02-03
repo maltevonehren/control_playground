@@ -1,7 +1,6 @@
+use ndarray::prelude::*;
 use std::fmt;
 use std::fmt::Write;
-
-use nalgebra::{DMatrix, DVector, RowDVector, SMatrix};
 
 use crate::{state_space::DiscreteStateSpaceModel, NiceFloat};
 
@@ -12,24 +11,26 @@ use crate::{state_space::DiscreteStateSpaceModel, NiceFloat};
 pub struct DiscreteTransferFunction {
     /// numerator polynomial.
     /// num[i] is the coefficient for z^(-i)
-    num: DVector<f64>,
+    num: Array1<f64>,
     /// numerator polynomial.
     /// den[j] is the coefficient for z^(-j)
-    den: DVector<f64>,
+    den: Array1<f64>,
 }
 
 impl DiscreteTransferFunction {
-    pub fn new(mut num: DVector<f64>, mut den: DVector<f64>) -> Option<Self> {
+    pub fn new(mut num: Array1<f64>, mut den: Array1<f64>) -> Option<Self> {
         if num.is_empty() || den.is_empty() {
             return None;
         }
-        let numlen = num.len();
-        let denlen = den.len();
-        if numlen < denlen {
-            num = num.insert_rows(0, denlen - numlen, 0.0);
+        let num_len = num.len();
+        let den_len = den.len();
+        if num_len < den_len {
+            num.append(Axis(0), Array::zeros(den_len - num_len).view())
+                .unwrap();
         }
-        if denlen < numlen {
-            den = den.insert_rows(0, numlen - denlen, 0.0);
+        if den_len < num_len {
+            den.append(Axis(0), Array::zeros(num_len - den_len).view())
+                .unwrap();
         }
         Some(Self { num, den })
     }
@@ -42,18 +43,19 @@ impl DiscreteTransferFunction {
         let order = self.den.len() - 1;
         let n0 = self.num[0];
 
-        let mut a = DMatrix::zeros(order, order);
-        let mut b = DVector::zeros(order);
-        let mut c =
-            RowDVector::from_iterator(order, self.den.iter().skip(1).map(|di| -di / d0 * n0 / d0));
-        let d = SMatrix::from_element(n0 / d0);
+        let mut a = Array2::zeros([order, order]);
+        let mut b = Array1::zeros(order);
+        let mut c = Array1::from_iter(self.den.iter().skip(1).map(|di| -di / d0 * n0 / d0));
+        let d = Array0::from_elem([], n0 / d0);
 
         if order > 0 {
             a.row_mut(0)
                 .iter_mut()
                 .zip(self.den.iter().skip(1))
                 .for_each(|(el, di)| *el = -di / d0);
-            a.view_mut((1, 0), (order - 1, order - 1)).fill_diagonal(1.);
+            a.slice_mut(s![1.., ..order])
+                .diag_mut()
+                .mapv_inplace(|_| 1.0);
 
             b[0] = 1.;
 
@@ -67,13 +69,18 @@ impl DiscreteTransferFunction {
         //     B' = inv(T) * B
         //     C' = C * T
 
-        Some(DiscreteStateSpaceModel { a, b, c, d })
+        Some(DiscreteStateSpaceModel::new(
+            a,
+            b.insert_axis(Axis(1)),
+            c.insert_axis(Axis(0)),
+            d.insert_axis(Axis(0)).insert_axis(Axis(0)),
+        ))
     }
 }
 
 impl fmt::Display for DiscreteTransferFunction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn format_poly(vals: &DVector<f64>) -> Result<String, fmt::Error> {
+        fn format_poly(vals: ArrayView1<'_, f64>) -> Result<String, fmt::Error> {
             let mut out = String::new();
             let mut written = false;
             for (i, el) in vals.iter().enumerate() {
@@ -101,9 +108,9 @@ impl fmt::Display for DiscreteTransferFunction {
             }
             Ok(out)
         }
-        let num = format_poly(&self.num)?;
+        let num = format_poly(self.num.view())?;
         let den_is_one = self.den[0] == 1.0 && self.den.iter().skip(1).all(|e| *e == 0.0);
-        let den = format_poly(&self.den)?;
+        let den = format_poly(self.den.view())?;
         let mut len = num.len();
         if !den_is_one {
             len = len.max(den.len())
@@ -125,8 +132,8 @@ mod tests {
     #[test]
     fn tf_display() {
         let tf = DiscreteTransferFunction {
-            num: DVector::from_iterator(3, [-1.0, 1.5, -2.0].iter().copied()),
-            den: DVector::from_iterator(3, [1.5, 0.5, 0.75].iter().copied()),
+            num: array![-1.0, 1.5, -2.0],
+            den: array![1.5, 0.5, 0.75],
         };
         let out = format!("{tf}");
         assert_eq!(
@@ -138,32 +145,26 @@ mod tests {
     #[test]
     fn state_space_conversion() {
         let tf = DiscreteTransferFunction {
-            num: DVector::from_iterator(3, [1.0, 1.5, 2.0].iter().copied()),
-            den: DVector::from_iterator(3, [1.5, 0.5, 0.75].iter().copied()),
+            num: array![1.0, 1.5, 2.0],
+            den: array![1.5, 0.5, 0.75],
         };
         let ss = tf.convert_to_state_space().unwrap();
-        assert_relative_eq!(
-            ss.a,
-            DMatrix::from_iterator(2, 2, [-1. / 3., 1., -0.5, 0.].iter().copied())
-        );
-        assert_relative_eq!(ss.b, DVector::from_iterator(2, [1., 0.].iter().copied()));
-        assert_relative_eq!(
-            ss.c,
-            RowDVector::from_iterator(2, [7. / 9., 1.0].iter().copied())
-        );
-        assert_relative_eq!(ss.d, SMatrix::<f64, 1, 1>::from_element(2. / 3.));
+        assert_relative_eq!(ss.a(), array![[-1. / 3., 1.], [-0.5, 0.]]);
+        assert_relative_eq!(ss.b(), array![[1.0], [0.0]]);
+        assert_relative_eq!(ss.c(), array![[7.0 / 9.0, 1.0]]);
+        assert_relative_eq!(ss.d(), array![[2.0 / 3.0]]);
     }
 
     #[test]
     fn state_space_conversion_gain_only() {
         let tf = DiscreteTransferFunction {
-            num: DVector::from_iterator(1, [2.0].iter().copied()),
-            den: DVector::from_iterator(1, [3.0].iter().copied()),
+            num: array![2.0],
+            den: array![3.0],
         };
         let ss = tf.convert_to_state_space().unwrap();
-        assert_relative_eq!(ss.a, DMatrix::zeros(0, 0));
-        assert_relative_eq!(ss.b, DVector::zeros(0));
-        assert_relative_eq!(ss.c, RowDVector::zeros(0));
-        assert_relative_eq!(ss.d, SMatrix::<f64, 1, 1>::from_element(2. / 3.));
+        assert_relative_eq!(ss.a(), Array2::zeros((0, 0)));
+        assert_relative_eq!(ss.b(), Array2::zeros((0, 1)));
+        assert_relative_eq!(ss.c(), Array2::zeros((1, 0)));
+        assert_relative_eq!(ss.d(), array![[2.0 / 3.0]]);
     }
 }

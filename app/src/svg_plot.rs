@@ -4,10 +4,10 @@ use std::rc::Rc;
 use engine::NiceFloat;
 use leptos::*;
 use leptos_use::{use_element_size, UseElementSizeReturn};
-use nalgebra::{DMatrix, Dim, MatrixView1xX};
+use ndarray::{Array2, ArrayView1};
 
 #[component]
-pub fn SVGPlot(#[prop(into)] data: Signal<Rc<DMatrix<f64>>>, initial_height: f64) -> impl IntoView {
+pub fn SVGPlot(#[prop(into)] data: Signal<Rc<Array2<f64>>>, initial_height: f64) -> impl IntoView {
     let el = create_node_ref::<html::Div>();
     let UseElementSizeReturn { width, height } = use_element_size(el);
 
@@ -22,7 +22,13 @@ pub fn SVGPlot(#[prop(into)] data: Signal<Rc<DMatrix<f64>>>, initial_height: f64
     let graph_width = move || width.get() - margin_left - margin_right;
     let graph_height = move || height() - margin_top - margin_bottom;
     let x_min_max = create_memo(move |_| (0.0, data.get().ncols() as f64 - 1.0));
-    let y_min_max = create_memo(move |_| (data.get().min(), data.get().max()));
+    let y_min_max = create_memo(move |_| {
+        log::debug!("{:?}", data.get());
+        (
+            data.get().fold(f64::MAX, |a, b| a.min(*b)),
+            data.get().fold(f64::MIN, |a, b| a.max(*b)),
+        )
+    });
 
     let x_axis = create_memo(move |_| {
         let max_num_ticks = (graph_width() / tightest_x_tick_spacing).floor() as usize + 1;
@@ -43,7 +49,7 @@ pub fn SVGPlot(#[prop(into)] data: Signal<Rc<DMatrix<f64>>>, initial_height: f64
                 d={move || format!("M 0,0 V{} H{} V0 H0", -graph_height(), graph_width())} />
             {move || {
                 let mapping = mapping.get();
-                data.get().row_iter().enumerate().map(
+                data.get().axis_iter(ndarray::Axis(0)).enumerate().map(
                     |(i, row)| make_path(colors[i % colors.len()], row, &mapping)
                 ).collect_view()
             }}
@@ -148,12 +154,7 @@ impl Axis {
     }
 }
 
-fn make_path(
-    color: &'static str,
-    // x: MatrixView1xX<f64, impl Dim, impl Dim>,
-    y: MatrixView1xX<f64, impl Dim, impl Dim>,
-    m: &Mapping,
-) -> impl IntoView {
+fn make_path(color: &'static str, y: ArrayView1<f64>, m: &Mapping) -> impl IntoView {
     let mut path = "M".to_string();
     for (x, y) in y.iter().enumerate() {
         let (x, y) = m.map((x as f64, *y));

@@ -1,3 +1,4 @@
+use ndarray::{Array1, Array2, Axis};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -6,7 +7,6 @@ use engine::dynamic_system::{
 };
 use engine::state_space::DiscreteStateSpaceModel;
 use engine::transfer_function::DiscreteTransferFunction;
-use nalgebra::{DMatrix, DVector};
 
 use crate::ast;
 use ast::{Expression, Program, Statement};
@@ -17,7 +17,7 @@ pub enum Error {
     NullDeref(Rc<str>),
     UnknownFunction(Rc<str>),
     TypeError,
-    IncorectNumberOfArguments(usize, usize),
+    IncorrectNumberOfArguments(usize, usize),
     Other(Rc<str>),
 }
 
@@ -32,8 +32,8 @@ impl From<std::fmt::Error> for Error {
 enum Value {
     String(Rc<str>),
     Float(f64),
-    Vector(Rc<DVector<f64>>),
-    Matrix(Rc<DMatrix<f64>>),
+    Vector(Rc<Array1<f64>>),
+    Matrix(Rc<Array2<f64>>),
     BuiltInFunction(BuiltInFunction),
     TransferFunction(Rc<DiscreteTransferFunction>),
     StateSpaceModel(Rc<DiscreteStateSpaceModel>),
@@ -44,7 +44,7 @@ enum Value {
 pub enum Output {
     Err(Error),
     Text(Rc<str>),
-    Plot(Rc<DMatrix<f64>>),
+    Plot(Rc<Array2<f64>>),
     System(Rc<CompoundSystem>),
 }
 
@@ -55,7 +55,7 @@ impl From<&Value> for Output {
             Value::Vector(data) => Output::Text(data.to_string().into()),
             Value::Matrix(data) => Output::Plot(data.clone()),
             Value::Float(f) => Output::Text(f.to_string().into()),
-            Value::BuiltInFunction(_) => Output::Text("<builtinfunction>".to_string().into()),
+            Value::BuiltInFunction(_) => Output::Text("<builtin_function>".to_string().into()),
             Value::TransferFunction(tf) => Output::Text(tf.to_string().into()),
             Value::StateSpaceModel(ss) => Output::Text(ss.to_string().into()),
             Value::CompoundSystem(s) => Output::System(s.clone()),
@@ -64,7 +64,7 @@ impl From<&Value> for Output {
 }
 
 impl Value {
-    fn get_sytem(&self) -> Result<SystemBlock, Error> {
+    fn get_system(&self) -> Result<SystemBlock, Error> {
         match self {
             Value::TransferFunction(tf) => Ok(SystemBlock::TransferFunction(tf.clone())),
             Value::StateSpaceModel(ss) => Ok(SystemBlock::StateSpace(ss.clone())),
@@ -137,7 +137,7 @@ fn eval(
                     Err(e) => Err(e),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            Value::Vector(Rc::new(DVector::from_vec(elements)))
+            Value::Vector(Rc::new(Array1::from_vec(elements)))
         }
         UnOp(op, e) => {
             use ast::UnOp::*;
@@ -180,7 +180,7 @@ fn eval(
             match function {
                 Load => {
                     if num_args != 1 {
-                        return Err(Error::IncorectNumberOfArguments(1, num_args));
+                        return Err(Error::IncorrectNumberOfArguments(1, num_args));
                     }
                     let Value::String(file_name) = eval(&arguments[0], values, exec_env)? else {
                         return Err(Error::TypeError);
@@ -191,23 +191,24 @@ fn eval(
                     let mut rdr = csv::ReaderBuilder::new()
                         .has_headers(false)
                         .from_reader(text.as_bytes());
-                    let mut m = DMatrix::zeros(0, 0);
+                    let mut m = Array2::zeros((0, 0));
                     for (i, result) in rdr.records().enumerate() {
                         let record =
                             result.map_err(|_| Error::Other("Error while parsing csv".into()))?;
                         if i == 0 {
-                            m = m.resize(record.len(), 0, 0.);
+                            m = Array2::zeros((record.len(), 0));
                         }
-                        m = m.insert_column(i, 0.);
-                        for (j, v) in record.iter().enumerate() {
-                            m[(j, i)] = v.parse().unwrap();
-                        }
+                        m.push(
+                            Axis(0),
+                            Array1::from_iter(record.iter().map(|v| v.parse().unwrap())).view(),
+                        )
+                        .expect("all columns to be of equal length");
                     }
                     Value::Matrix(Rc::new(m))
                 }
                 TransferFunction => {
                     if num_args != 2 {
-                        return Err(Error::IncorectNumberOfArguments(2, num_args));
+                        return Err(Error::IncorrectNumberOfArguments(2, num_args));
                     }
                     let Value::Vector(num) = eval(&arguments[0], values, exec_env)? else {
                         return Err(Error::TypeError);
@@ -221,7 +222,7 @@ fn eval(
                 }
                 Tf2Ss => {
                     if num_args != 1 {
-                        return Err(Error::IncorectNumberOfArguments(1, num_args));
+                        return Err(Error::IncorrectNumberOfArguments(1, num_args));
                     }
                     let Value::TransferFunction(tf) = eval(&arguments[0], values, exec_env)? else {
                         return Err(Error::TypeError);
@@ -233,13 +234,13 @@ fn eval(
                 }
                 Step => {
                     if num_args != 1 {
-                        return Err(Error::IncorectNumberOfArguments(1, num_args));
+                        return Err(Error::IncorrectNumberOfArguments(1, num_args));
                     }
                     let system = eval(&arguments[0], values, exec_env)?;
                     let system = match system {
                         Value::CompoundSystem(s) => s,
                         other => {
-                            let Ok(block) = other.get_sytem() else {
+                            let Ok(block) = other.get_system() else {
                                 return Err(Error::TypeError);
                             };
                             CompoundSystem::new(vec![CompoundSystemComponentDefinition {
@@ -254,7 +255,7 @@ fn eval(
                     let sim = Simulation::new(&system)
                         .ok_or(Error::Other("could not init sim".into()))?;
                     let output = sim.execute();
-                    Value::Matrix(Rc::new(output.insert_rows(0, 0, 0.))) // TODO: is there a better way to convert to DMatrix?
+                    Value::Matrix(Rc::new(output.insert_axis(Axis(0))))
                 }
             }
         }
@@ -264,7 +265,7 @@ fn eval(
                 let system = values
                     .get(&item.item_name)
                     .ok_or(Error::NullDeref(item.item_name.clone()))?
-                    .get_sytem()?;
+                    .get_system()?;
                 sub_systems.push(CompoundSystemComponentDefinition {
                     block: system,
                     reads_input_from: item.input_name.clone(),

@@ -1,10 +1,9 @@
 use log::info;
+use ndarray::prelude::*;
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::Range;
 use std::rc::Rc;
-
-use nalgebra::{DVector, RowDVector, Vector1};
 
 use crate::state_space::DiscreteStateSpaceModel;
 use crate::transfer_function::DiscreteTransferFunction;
@@ -119,14 +118,14 @@ impl Simulation {
         })
     }
 
-    pub fn execute(&self) -> RowDVector<f64> {
+    pub fn execute(&self) -> Array1<f64> {
         info!("{self:?}");
-        let mut states = DVector::zeros(self.state_size);
+        let mut states = Array1::zeros(self.state_size);
         let steps = 35;
-        let mut output = RowDVector::zeros(steps + 1);
+        let mut output = Array1::zeros(steps + 1);
 
         let u = 1.0;
-        let mut signals = DVector::zeros(self.signals_size);
+        let mut signals = Array1::zeros(self.signals_size);
         for i in 0..=steps {
             signals[0] = u;
             for step in &self.execution_plan {
@@ -136,23 +135,27 @@ impl Simulation {
                         output_position,
                     } => {
                         let block = &self.blocks[*system_id];
+                        let (input, output) = signals.multi_slice_mut((
+                            s![block.reads_input_from..=block.reads_input_from],
+                            s![*output_position..=*output_position],
+                        ));
                         block.executable.calculate_output(
-                            signals[block.reads_input_from],
-                            states.rows(block.state_mapping.start, block.state_mapping.len()),
-                            &mut signals[*output_position],
+                            input.view(),
+                            states.slice(s![block.state_mapping.clone()]),
+                            output,
                         );
                     }
                     ExecutionStep::UpdateState { system_id } => {
                         let block = &self.blocks[*system_id];
                         block.executable.update_state(
-                            signals[block.reads_input_from],
-                            states.rows_mut(block.state_mapping.start, block.state_mapping.len()),
+                            signals.slice(s![block.reads_input_from..=block.reads_input_from]),
+                            states.slice_mut(s![block.state_mapping.clone()]),
                         );
                     }
                 };
             }
             let output_this_cycle = signals[signals.len() - 1];
-            output.set_column(i, &Vector1::new(output_this_cycle));
+            output[i] = output_this_cycle;
         }
         output
     }
