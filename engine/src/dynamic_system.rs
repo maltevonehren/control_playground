@@ -28,6 +28,8 @@ impl fmt::Display for SystemBlock {
 pub struct Simulation {
     blocks: Vec<SimulationBlock>,
     execution_plan: Vec<ExecutionStep>,
+    input_signal_mapping: Range<usize>,
+    output_signal_mapping: usize,
     state_size: usize,
     signals_size: usize,
 }
@@ -35,29 +37,27 @@ pub struct Simulation {
 #[derive(Clone, Debug)]
 struct SimulationBlock {
     executable: Rc<DiscreteStateSpaceModel>,
+    input_signal_mapping: Range<usize>,
     state_mapping: Range<usize>,
-    reads_input_from: usize,
+    output_signal_mapping: Range<usize>,
 }
 
 #[derive(Clone, Copy, Debug)]
 enum ExecutionStep {
-    CalculateOutput {
-        system_id: usize,
-        output_position: usize,
-    },
-    UpdateState {
-        system_id: usize,
-    },
+    CalculateOutput { system_id: usize },
+    UpdateState { system_id: usize },
 }
 
 impl Simulation {
     pub fn new(system: &CompoundSystem) -> Option<Self> {
-        let num_signals = system.components.len() + 1;
-
+        let mut signals_size = 0;
         let mut blocks = vec![];
+
         let mut state_size = 0;
         let mut dependencies: Vec<Vec<usize>> = vec![];
-        dependencies.resize(num_signals, vec![]);
+        dependencies.resize(system.components.len() + 1, vec![]);
+        let input_signal_mapping = signals_size..signals_size + 1;
+        signals_size += 1;
 
         // build execution graph
         // for now: calculate all signals first, then update discrete states.
@@ -71,19 +71,32 @@ impl Simulation {
                     Rc::new(b)
                 }
             };
-            let sub_system_state_count = executable.state_size();
-            let state_mapping = (state_size)..(state_size + sub_system_state_count);
+            let state_mapping = (state_size)..(state_size + executable.state_size());
+            let output_signal_mapping = (signals_size)..(signals_size + executable.output_size());
+            state_size += executable.state_size();
+            signals_size += executable.output_size();
 
             if executable.has_feedthrough() {
                 dependencies[i].push(component.reads_input_from);
             }
             blocks.push(SimulationBlock {
                 executable,
+                input_signal_mapping: 0..0, // mapped later
                 state_mapping,
-                reads_input_from: component.reads_input_from,
+                output_signal_mapping,
             });
+        }
 
-            state_size += sub_system_state_count;
+        // adjust reads_input_from after all output signal have been mapped
+        for (i, component) in system.components.iter().enumerate() {
+            let input_mapping = if component.reads_input_from == 0 {
+                input_signal_mapping.clone()
+            } else {
+                blocks[component.reads_input_from - 1]
+                    .output_signal_mapping
+                    .clone()
+            };
+            blocks[i].input_signal_mapping = input_mapping;
         }
 
         // TODO: topological sort
@@ -99,10 +112,7 @@ impl Simulation {
 
         let mut execution_plan = vec![];
         for i in 0..blocks.len() {
-            execution_plan.push(ExecutionStep::CalculateOutput {
-                system_id: i,
-                output_position: i + 1,
-            });
+            execution_plan.push(ExecutionStep::CalculateOutput { system_id: i });
         }
         for (i, block) in blocks.iter().enumerate() {
             if block.executable.state_size() > 0 {
@@ -110,10 +120,15 @@ impl Simulation {
             }
         }
 
+        // TODO: take output to be last signal
+        let output_signal_mapping = signals_size - 1;
+
         Some(Self {
             blocks,
             state_size,
-            signals_size: num_signals,
+            input_signal_mapping,
+            output_signal_mapping,
+            signals_size,
             execution_plan,
         })
     }
@@ -124,20 +139,19 @@ impl Simulation {
         let steps = 35;
         let mut output = Array1::zeros(steps + 1);
 
-        let u = 1.0;
+        let u = Array1::from_elem((1,), 1.0);
         let mut signals = Array1::zeros(self.signals_size);
         for i in 0..=steps {
-            signals[0] = u;
+            signals
+                .slice_mut(s![self.input_signal_mapping.clone()])
+                .assign(&u);
             for step in &self.execution_plan {
                 match step {
-                    ExecutionStep::CalculateOutput {
-                        system_id,
-                        output_position,
-                    } => {
+                    ExecutionStep::CalculateOutput { system_id } => {
                         let block = &self.blocks[*system_id];
                         let (input, output) = signals.multi_slice_mut((
-                            s![block.reads_input_from..=block.reads_input_from],
-                            s![*output_position..=*output_position],
+                            s![block.input_signal_mapping.clone()],
+                            s![block.output_signal_mapping.clone()],
                         ));
                         block.executable.calculate_output(
                             input.view(),
@@ -148,13 +162,13 @@ impl Simulation {
                     ExecutionStep::UpdateState { system_id } => {
                         let block = &self.blocks[*system_id];
                         block.executable.update_state(
-                            signals.slice(s![block.reads_input_from..=block.reads_input_from]),
+                            signals.slice(s![block.input_signal_mapping.clone()]),
                             states.slice_mut(s![block.state_mapping.clone()]),
                         );
                     }
                 };
             }
-            let output_this_cycle = signals[signals.len() - 1];
+            let output_this_cycle = signals[self.output_signal_mapping];
             output[i] = output_this_cycle;
         }
         output

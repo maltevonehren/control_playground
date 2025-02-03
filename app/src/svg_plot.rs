@@ -23,7 +23,6 @@ pub fn SVGPlot(#[prop(into)] data: Signal<Rc<Array2<f64>>>, initial_height: f64)
     let graph_height = move || height() - margin_top - margin_bottom;
     let x_min_max = create_memo(move |_| (0.0, data.get().ncols() as f64 - 1.0));
     let y_min_max = create_memo(move |_| {
-        log::debug!("{:?}", data.get());
         (
             data.get().fold(f64::MAX, |a, b| a.min(*b)),
             data.get().fold(f64::MIN, |a, b| a.max(*b)),
