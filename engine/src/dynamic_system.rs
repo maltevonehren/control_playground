@@ -1,8 +1,7 @@
 use log::info;
-use ndarray::prelude::*;
+use ndarray::{prelude::*, Slice};
 use std::collections::HashMap;
 use std::fmt;
-use std::ops::Range;
 use std::rc::Rc;
 
 use crate::state_space::DiscreteStateSpaceModel;
@@ -12,6 +11,7 @@ use crate::transfer_function::DiscreteTransferFunction;
 pub enum SystemBlock {
     StateSpace(Rc<DiscreteStateSpaceModel>),
     TransferFunction(Rc<DiscreteTransferFunction>),
+    Difference,
     // SubSystem(Rc<CompoundDiscreteSystem>),
 }
 
@@ -20,6 +20,7 @@ impl fmt::Display for SystemBlock {
         match self {
             SystemBlock::StateSpace(ss) => ss.fmt(f),
             SystemBlock::TransferFunction(tf) => tf.fmt(f),
+            SystemBlock::Difference => f.write_str("−"),
         }
     }
 }
@@ -28,7 +29,7 @@ impl fmt::Display for SystemBlock {
 pub struct Simulation {
     blocks: Vec<SimulationBlock>,
     execution_plan: Vec<ExecutionStep>,
-    input_signal_mapping: Range<usize>,
+    input_signal_mapping: Slice,
     output_signal_mapping: usize,
     state_size: usize,
     signals_size: usize,
@@ -37,14 +38,15 @@ pub struct Simulation {
 #[derive(Clone, Debug)]
 struct SimulationBlock {
     executable: Rc<DiscreteStateSpaceModel>,
-    input_signal_mapping: Range<usize>,
-    state_mapping: Range<usize>,
-    output_signal_mapping: Range<usize>,
+    input_signal_mapping: Slice,
+    state_mapping: Slice,
+    output_signal_mapping: Slice,
 }
 
 #[derive(Clone, Copy, Debug)]
 enum ExecutionStep {
     CalculateOutput { system_id: usize },
+    CalculateOutputWithFeedthrough { system_id: usize },
     UpdateState { system_id: usize },
 }
 
@@ -54,9 +56,9 @@ impl Simulation {
         let mut blocks = vec![];
 
         let mut state_size = 0;
-        let mut dependencies: Vec<Vec<usize>> = vec![];
+        let mut dependencies: Vec<Vec<Signal>> = vec![];
         dependencies.resize(system.components.len() + 1, vec![]);
-        let input_signal_mapping = signals_size..signals_size + 1;
+        let input_signal_mapping = (signals_size..signals_size + 1).into();
         signals_size += 1;
 
         // build execution graph
@@ -70,18 +72,27 @@ impl Simulation {
                     let b = tf.convert_to_state_space()?;
                     Rc::new(b)
                 }
+                SystemBlock::Difference => Rc::new(DiscreteStateSpaceModel::new(
+                    Array2::zeros((0, 0)),
+                    Array2::zeros((0, 2)),
+                    Array2::zeros((1, 0)),
+                    array![[1.0, -1.0]],
+                )),
             };
-            let state_mapping = (state_size)..(state_size + executable.state_size());
-            let output_signal_mapping = (signals_size)..(signals_size + executable.output_size());
+            let state_mapping = (state_size..(state_size + executable.state_size())).into();
+            let output_signal_mapping =
+                (signals_size..(signals_size + executable.output_size())).into();
             state_size += executable.state_size();
             signals_size += executable.output_size();
 
             if executable.has_feedthrough() {
-                dependencies[i].push(component.reads_input_from);
+                for input in component.reads_input_from.iter() {
+                    dependencies[i].push(*input);
+                }
             }
             blocks.push(SimulationBlock {
                 executable,
-                input_signal_mapping: 0..0, // mapped later
+                input_signal_mapping: (0..0).into(), // mapped later
                 state_mapping,
                 output_signal_mapping,
             });
@@ -89,14 +100,34 @@ impl Simulation {
 
         // adjust reads_input_from after all output signal have been mapped
         for (i, component) in system.components.iter().enumerate() {
-            let input_mapping = if component.reads_input_from == 0 {
-                input_signal_mapping.clone()
-            } else {
-                blocks[component.reads_input_from - 1]
-                    .output_signal_mapping
-                    .clone()
+            let input_mapping = match component.reads_input_from[..] {
+                [input] => match input {
+                    Signal::SystemInput => input_signal_mapping,
+                    Signal::ComponentOutput(i) => blocks[i].output_signal_mapping,
+                },
+                [input1, input2] => {
+                    // support having two inputs (both of size 1) by mapping
+                    // to a slice with two elements and a large step
+                    let input1 = match input1 {
+                        Signal::SystemInput => input_signal_mapping,
+                        Signal::ComponentOutput(i) => blocks[i].output_signal_mapping,
+                    };
+                    let input2 = match input2 {
+                        Signal::SystemInput => input_signal_mapping,
+                        Signal::ComponentOutput(i) => blocks[i].output_signal_mapping,
+                    };
+                    if Some(input1.start + 1) != input1.end || Some(input2.start + 1) != input2.end
+                    {
+                        panic!("can only subtract two signals of size 1");
+                    }
+                    let start = input1.start.min(input2.start);
+                    let end = input1.start.max(input2.start);
+                    Slice::new(start, Some(end + 1), input2.start - input1.start)
+                }
+                _ => panic!(),
             };
             blocks[i].input_signal_mapping = input_mapping;
+            // TODO: ensure input and output do not overlap, if we have feedthrough (algebraic loop)
         }
 
         // TODO: topological sort
@@ -111,8 +142,12 @@ impl Simulation {
         // }
 
         let mut execution_plan = vec![];
-        for i in 0..blocks.len() {
-            execution_plan.push(ExecutionStep::CalculateOutput { system_id: i });
+        for (i, block) in blocks.iter().enumerate() {
+            if block.executable.has_feedthrough() {
+                execution_plan.push(ExecutionStep::CalculateOutputWithFeedthrough { system_id: i });
+            } else if block.executable.output_size() > 0 {
+                execution_plan.push(ExecutionStep::CalculateOutput { system_id: i });
+            }
         }
         for (i, block) in blocks.iter().enumerate() {
             if block.executable.state_size() > 0 {
@@ -142,28 +177,33 @@ impl Simulation {
         let u = Array1::from_elem((1,), 1.0);
         let mut signals = Array1::zeros(self.signals_size);
         for i in 0..=steps {
-            signals
-                .slice_mut(s![self.input_signal_mapping.clone()])
-                .assign(&u);
+            signals.slice_mut(s![self.input_signal_mapping]).assign(&u);
             for step in &self.execution_plan {
                 match step {
                     ExecutionStep::CalculateOutput { system_id } => {
                         let block = &self.blocks[*system_id];
-                        let (input, output) = signals.multi_slice_mut((
-                            s![block.input_signal_mapping.clone()],
-                            s![block.output_signal_mapping.clone()],
-                        ));
                         block.executable.calculate_output(
+                            states.slice(s![block.state_mapping]),
+                            signals.slice_mut(s![block.output_signal_mapping]),
+                        );
+                    }
+                    ExecutionStep::CalculateOutputWithFeedthrough { system_id } => {
+                        let block = &self.blocks[*system_id];
+                        let (input, output) = signals.multi_slice_mut((
+                            s![block.input_signal_mapping],
+                            s![block.output_signal_mapping],
+                        ));
+                        block.executable.calculate_output_with_feedthrough(
                             input.view(),
-                            states.slice(s![block.state_mapping.clone()]),
+                            states.slice(s![block.state_mapping]),
                             output,
                         );
                     }
                     ExecutionStep::UpdateState { system_id } => {
                         let block = &self.blocks[*system_id];
                         block.executable.update_state(
-                            signals.slice(s![block.input_signal_mapping.clone()]),
-                            states.slice_mut(s![block.state_mapping.clone()]),
+                            signals.slice(s![block.input_signal_mapping]),
+                            states.slice_mut(s![block.state_mapping]),
                         );
                     }
                 };
@@ -185,26 +225,32 @@ pub struct CompoundSystem {
 pub struct CompoundSystemComponent {
     pub block: SystemBlock,
     pub name: Rc<str>,
-    pub reads_input_from: usize,
+    pub reads_input_from: Rc<[Signal]>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Signal {
+    SystemInput,
+    ComponentOutput(usize),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompoundSystemComponentDefinition {
     pub block: SystemBlock,
     pub name: Rc<str>,
-    pub reads_input_from: Rc<str>,
+    pub reads_input_from: Rc<[Rc<str>]>,
 }
 
 impl CompoundSystem {
     pub fn new(components: Vec<CompoundSystemComponentDefinition>) -> Result<Self, Rc<str>> {
         // do name resolution
         let mut signal_names = HashMap::new();
-        signal_names.insert("u".into(), 0);
+        signal_names.insert("u".into(), Signal::SystemInput);
         for (i, sub_system) in components.iter().enumerate() {
             if signal_names.contains_key(&sub_system.name) {
                 return Err(format!("duplicate name {}", sub_system.name).into());
             }
-            signal_names.insert(sub_system.name.clone(), i + 1);
+            signal_names.insert(sub_system.name.clone(), Signal::ComponentOutput(i));
         }
 
         let components = components
@@ -213,9 +259,16 @@ impl CompoundSystem {
                 Ok(CompoundSystemComponent {
                     block: c.block,
                     name: c.name,
-                    reads_input_from: *signal_names
-                        .get(&c.reads_input_from)
-                        .ok_or(format!("signal {} does not exist", &c.reads_input_from))?,
+                    reads_input_from: c
+                        .reads_input_from
+                        .iter()
+                        .map(|input| {
+                            signal_names
+                                .get(input)
+                                .ok_or(format!("signal {} does not exist", input))
+                                .copied()
+                        })
+                        .collect::<Result<_, String>>()?,
                 })
             })
             .collect::<Result<_, String>>()?;

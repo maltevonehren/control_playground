@@ -8,7 +8,7 @@ use engine::dynamic_system::{
 use engine::state_space::DiscreteStateSpaceModel;
 use engine::transfer_function::DiscreteTransferFunction;
 
-use crate::ast;
+use crate::ast::{self, SystemItemRhs};
 use ast::{Expression, Program, Statement};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -246,7 +246,7 @@ fn eval(
                             CompoundSystem::new(vec![CompoundSystemComponentDefinition {
                                 block,
                                 name: "".into(),
-                                reads_input_from: "u".into(),
+                                reads_input_from: ["u".into()].into(),
                             }])
                             .map_err(Error::Other)?
                             .into()
@@ -262,13 +262,29 @@ fn eval(
         System(items) => {
             let mut sub_systems = Vec::new();
             for item in items {
-                let system = values
-                    .get(&item.item_name)
-                    .ok_or(Error::NullDeref(item.item_name.clone()))?
-                    .get_system()?;
+                let (inputs, system): (Rc<[Rc<str>]>, SystemBlock) = match &item.rhs {
+                    SystemItemRhs::Difference {
+                        input1_name,
+                        input2_name,
+                    } => (
+                        [input1_name.clone(), input2_name.clone()].into(),
+                        SystemBlock::Difference,
+                    ),
+                    SystemItemRhs::System {
+                        system_name,
+                        input_name,
+                    } => (
+                        [input_name.clone()].into(),
+                        values
+                            .get(system_name)
+                            .ok_or(Error::NullDeref(system_name.clone()))?
+                            .get_system()?,
+                    ),
+                };
+                let inputs: Rc<[Rc<str>]> = inputs;
                 sub_systems.push(CompoundSystemComponentDefinition {
                     block: system,
-                    reads_input_from: item.input_name.clone(),
+                    reads_input_from: inputs,
                     name: item.output_name.clone(),
                 });
             }

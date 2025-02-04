@@ -48,16 +48,32 @@ pub(crate) SystemDef: Vec<SystemItem> = {
 };
 
 SystemItem: SystemItem = {
-    <output_name:Identifier> "=" <item_name:Identifier> "(" <input_name:Identifier> ")" => SystemItem {
-        input_name: input_name.into(),
-        item_name: item_name.into(),
-        output_name: output_name.into(),
-    },
-    <item_name:Identifier> "(" <input_name:Identifier> ")" => SystemItem {
-        input_name: input_name.into(),
-        item_name: item_name.into(),
-        output_name: item_name.into(),
-    },
+    <output_name:Identifier> "=" <rhs:SystemItemRhs> =>
+        SystemItem {
+            output_name: output_name.into(),
+            rhs: rhs,
+        },
+    <system_name:Identifier> "(" <input_name:Identifier> ")" =>
+        SystemItem {
+            output_name: system_name.into(),
+            rhs: SystemItemRhs::System {
+                input_name: input_name.into(),
+                system_name: system_name.into(),
+            }
+        },
+}
+
+SystemItemRhs: SystemItemRhs = {
+    <system_name:Identifier> "(" <input_name:Identifier> ")" =>
+        SystemItemRhs::System {
+            system_name: system_name.into(),
+            input_name: input_name.into(),
+        },
+    <input1_name:Identifier> "-" <input2_name:Identifier> =>
+        SystemItemRhs::Difference {
+            input1_name: input1_name.into(),
+            input2_name: input2_name.into(),
+        },
 }
 
 ExpressionList = Comma<Expression>;

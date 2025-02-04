@@ -28,9 +28,20 @@ pub(crate) enum Expression {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SystemItem {
-    pub input_name: Rc<str>,
-    pub item_name: Rc<str>,
     pub output_name: Rc<str>,
+    pub rhs: SystemItemRhs,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum SystemItemRhs {
+    Difference {
+        input1_name: Rc<str>,
+        input2_name: Rc<str>,
+    },
+    System {
+        system_name: Rc<str>,
+        input_name: Rc<str>,
+    },
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

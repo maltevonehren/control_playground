@@ -66,7 +66,11 @@ impl DiscreteStateSpaceModel {
         state.assign(&new_state);
     }
 
-    pub fn calculate_output(
+    pub fn calculate_output(&self, state: ArrayView1<'_, f64>, mut output: ArrayViewMut1<'_, f64>) {
+        output.assign(&self.c().dot(&state));
+    }
+
+    pub fn calculate_output_with_feedthrough(
         &self,
         input: ArrayView1<'_, f64>,
         state: ArrayView1<'_, f64>,
